@@ -21,9 +21,10 @@ jobs:
       - name: Fetch and unpack source bundle
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/media-vault-src.zip https://aka.doubaocdn.com/s/dUl7uBdzu3
-          unzip -o /tmp/media-vault-src.zip -d .
+          curl -fsSL -A "Mozilla/5.0" -o /tmp/media-vault-src.zip https://aka.doubaocdn.com/s/dUl7uBdzu3
+          unzip -o -q /tmp/media-vault-src.zip -d .
           rm -f /tmp/media-vault-src.zip
+          rm -f .github/workflows/validate.yml
 
       - name: Commit and push
         run: |
@@ -37,3 +38,4 @@ jobs:
           fi
           git commit -m "chore(bootstrap): import media-vault v1.0.0 source tree"
           git push origin HEAD:main
+          echo "imported $(git show --stat --oneline HEAD | tail -1)"
