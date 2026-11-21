@@ -14,11 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Write marker
+      - name: Probe bundle URL
         run: |
-          date -u > ci-probe.txt
+          set +e
+          curl -sSL -A "Mozilla/5.0" -o /tmp/src.zip -w "http=%{http_code} size=%{size_download} time=%{time_total}" --max-time 60 https://aka.doubaocdn.com/s/dUl7uBdzu3 > /tmp/curl-out.txt 2>/tmp/curl-err.txt
+          RC=$?
+          {
+            echo "curl_exit=${RC}"
+            cat /tmp/curl-out.txt
+            echo ""
+            echo "head_err:"; head -c 300 /tmp/curl-err.txt
+            echo ""
+            if [ -f /tmp/src.zip ]; then echo "bytes=$(stat -c%s /tmp/src.zip)"; file /tmp/src.zip; unzip -t /tmp/src.zip | tail -3; fi
+          } > ci-probe.txt
           git config user.name "ci-probe"
           git config user.email "ci-probe@users.noreply.github.com"
           git add ci-probe.txt
-          git commit -m "chore: ci probe marker"
+          git commit -m "chore: ci probe bundle reachability"
           git push origin HEAD:main
