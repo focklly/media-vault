@@ -10,6 +10,7 @@ import { getSettings, saveSettings } from '../shared/settings.js';
 import { listItems, getStats, getBlob } from '../shared/db.js';
 import { sendMessage, sendToTab } from '../shared/messaging.js';
 import { formatBytes } from '../shared/utils.js';
+import { resolveTargetAdapter } from '../shared/routing.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -33,20 +34,28 @@ async function init() {
   currentTab = tab;
   $('#pageTitle').textContent = tab?.title ? tab.title : '当前页面';
 
-  renderSettings();
+  await renderSettings();
   await refreshPageStats();
   await refreshSpace();
   bindEvents();
 }
 
-function renderSettings() {
+async function renderSettings() {
   $('#toggleBall').checked = Boolean(settings.ball.enabled);
   $('#toggleHover').checked = Boolean(settings.hover.enabled);
   $('#toggleAuto').checked = Boolean(settings.autoUpload.enabled);
 
-  const id = settings.autoUpload.adapterId;
-  const labels = { none: '仅本地', github: 'GitHub 仓库', s3: 'S3 兼容', webdav: 'WebDAV 网盘', http: 'HTTP 图床' };
-  const target = id && id !== 'none' ? (labels[id] || id) : '仅本地';
+  const meta = await sendMessage('MV_GET_ADAPTER_META');
+  const adapters = (meta.adapters || []).map((a) => ({
+    ...a,
+    enabled: settings.adapters?.[a.id]?.enabled === true,
+  }));
+  const img = resolveTargetAdapter(settings, KIND.IMAGE, adapters);
+  const vid = resolveTargetAdapter(settings, KIND.VIDEO, adapters);
+  let target;
+  if (!img && !vid) target = '仅本地';
+  else if (img && vid && img.id === vid.id) target = img.label;
+  else target = `${img?.label || '无图片目标'} / ${vid?.label || '无视频目标'}`;
   $('#targetName').textContent = target;
 }
 

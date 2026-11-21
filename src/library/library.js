@@ -17,6 +17,7 @@ import {
 import { getSettings } from '../shared/settings.js';
 import { runTask, sendMessage } from '../shared/messaging.js';
 import { formatBytes, formatDuration, formatDate, hostOf } from '../shared/utils.js';
+import { resolveTargetAdapter, adapterLabel, adapterSupports, unsupportedReason } from '../shared/routing.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,6 +29,7 @@ const state = {
   filter: 'all',
   sort: 'new',
   q: '',
+  tagFilter: new Set(),  // 快捷筛选：多选标签
   selected: new Set(),
   urls: new Map(),      // itemId -> objectURL（缩略图）
   observer: null,
@@ -165,8 +167,11 @@ function applyFilter() {
   }
   if (state.q) {
     const key = state.q.trim().toLowerCase();
-    list = list.filter((i) => [i.title, i.fileName, i.site, i.pageUrl, i.sourceUrl, i.note]
+    list = list.filter((i) => [i.title, i.fileName, i.site, i.pageUrl, i.sourceUrl, i.note, ...(i.tags || [])]
       .filter(Boolean).join(' ').toLowerCase().includes(key));
+  }
+  if (state.tagFilter.size) {
+    list = list.filter((i) => (i.tags || []).some((t) => state.tagFilter.has(t)));
   }
   list = sortList(list, state.sort);
   state.filtered = list;
@@ -174,8 +179,55 @@ function applyFilter() {
   $('#filterLabel').textContent = FILTER_LABEL[state.filter] || '全部媒体';
   $('#resultCount').textContent = `共 ${list.length} 个`;
   renderGrid();
+  renderTagRow();
   syncBulkBar();
   renderSidebarCounts();
+}
+
+/** 标签快捷筛选行：按出现频次排序，可多选，可一键清除 */
+function renderTagRow() {
+  const row = $('#tagRow');
+  if (!row) return;
+  const freq = new Map();
+  for (const item of state.items) {
+    for (const t of new Set(item.tags || [])) {
+      freq.set(t, (freq.get(t) || 0) + 1);
+    }
+  }
+  const tags = [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'));
+  row.innerHTML = '';
+  if (!tags.length) {
+    row.hidden = true;
+    return;
+  }
+  row.hidden = false;
+  const label = document.createElement('span');
+  label.className = 'tagrow-label';
+  label.textContent = '标签';
+  row.appendChild(label);
+
+  for (const [tag, count] of tags) {
+    const chip = document.createElement('button');
+    chip.className = `chip${state.tagFilter.has(tag) ? ' active' : ''}`;
+    chip.textContent = `${tag} · ${count}`;
+    chip.addEventListener('click', () => {
+      if (state.tagFilter.has(tag)) state.tagFilter.delete(tag);
+      else state.tagFilter.add(tag);
+      applyFilter();
+    });
+    row.appendChild(chip);
+  }
+
+  if (state.tagFilter.size) {
+    const clear = document.createElement('button');
+    clear.className = 'chip clear';
+    clear.textContent = '清除筛选';
+    clear.addEventListener('click', () => {
+      state.tagFilter.clear();
+      applyFilter();
+    });
+    row.appendChild(clear);
+  }
 }
 
 function sortList(list, sort) {
@@ -281,6 +333,14 @@ function renderGrid() {
       thumb.appendChild(cloud);
     }
 
+    // 站点角标：显示适配器名称（不显示 adapterId）；未上传显示「本地」
+    const site = document.createElement('span');
+    site.className = 'site-badge';
+    const siteLabel = item.remote?.url ? labelFor(item.remote.adapterId) : '本地';
+    site.textContent = siteLabel;
+    site.title = item.remote?.url ? `存入站点：${siteLabel}` : '仅存本地';
+    thumb.appendChild(site);
+
     const check = document.createElement('button');
     check.className = 'check';
     check.title = '选择';
@@ -322,6 +382,19 @@ function renderGrid() {
       <div class="card-sub"><span>${formatBytes(item.size || 0)}</span><span>·</span><span>${esc(item.site || '—')}</span></div>
       ${item.remote?.error ? `<div class="card-fail" title="${escapeAttr(item.remote.error)}">上传失败：${esc(item.remote.error)}</div>` : ''}
     `;
+    const tags = item.tags || [];
+    if (tags.length) {
+      const chips = document.createElement('div');
+      chips.className = 'chips';
+      tags.slice(0, 3).forEach((t) => chips.appendChild(makeChip(t)));
+      if (tags.length > 3) {
+        const more = document.createElement('span');
+        more.className = 'chip more';
+        more.textContent = `+${tags.length - 3}`;
+        chips.appendChild(more);
+      }
+      meta.appendChild(chips);
+    }
     card.append(thumb, meta);
     frag.appendChild(card);
   }
@@ -416,6 +489,7 @@ async function openModal(id) {
     preview.innerHTML = '<div class="ph">预览加载失败</div>';
   }
 
+  const history = item.remote?.history || [];
   const rows = [
     ['类型', `${item.kind === KIND.VIDEO ? '视频' : '图片'}${item.status === 'link-only' ? '（仅链接）' : ''}`],
     ['文件名', item.fileName || '—'],
@@ -424,28 +498,52 @@ async function openModal(id) {
     ['时长', item.kind === KIND.VIDEO && item.duration ? formatDuration(item.duration) : '—'],
     ['来源站点', item.site || '—'],
     ['入库时间', formatDate(item.createdAt)],
-    ['上传状态', item.remote?.url ? `已上传（${item.remote.adapterId}）` : (item.remote?.error ? '失败' : '未上传')],
+    ['上传状态', item.remote?.url ? `已上传（${labelFor(item.remote.adapterId)}）` : (item.remote?.error ? `失败（${labelFor(item.remote.adapterId)}）` : '未上传')],
     ['远程链接', item.remote?.url || '—', item.remote?.url],
     ['来源页', item.pageUrl || '—', item.pageUrl],
     ['原始链接', item.sourceUrl || '—', item.sourceUrl],
     ['备注', item.note || '—'],
   ];
+  if (history.length) {
+    rows.push(['转存历史', history.map((h) => `${labelFor(h.adapterId)}${h.at ? ` · ${formatDate(h.at)}` : ''}`).join(' → ')]);
+  }
   $('#mInfo').innerHTML = rows.map(([k, v, link]) => {
-    const wide = k === '来源页' || k === '原始链接' || k === '备注';
+    const wide = k === '来源页' || k === '原始链接' || k === '备注' || k === '转存历史';
     const value = link
       ? `<b title="${escapeAttr(v)}"><a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">${esc(v)}</a></b>`
       : `<b title="${escapeAttr(v)}">${esc(v)}</b>`;
     return `<div class="info-row ${wide ? 'wide' : ''}"><span>${k}</span>${value}</div>`;
   }).join('');
 
+  // 标签编辑：逗号/空格分隔，去重去空，失焦或回车写回
+  const tagsRow = document.createElement('div');
+  tagsRow.className = 'info-row wide tags-row';
+  const tagLabel = document.createElement('span');
+  tagLabel.textContent = '标签';
+  const tagInput = document.createElement('input');
+  tagInput.className = 'tag-input';
+  tagInput.value = (item.tags || []).join(', ');
+  tagInput.placeholder = '用逗号或空格分隔，例如：截图, 壁纸';
+  const saveTags = async () => {
+    const tags = parseTags(tagInput.value);
+    await updateItem(item.id, { tags });
+    item.tags = tags;
+    await refresh();
+  };
+  tagInput.addEventListener('blur', saveTags);
+  tagInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tagInput.blur(); });
+  tagsRow.append(tagLabel, tagInput);
+  $('#mInfo').appendChild(tagsRow);
+
   const actions = $('#mActions');
   actions.innerHTML = '';
-  const adapterOptions = availableAdapters();
+  const adapterOptions = adapterOptionsFor(item.kind);
   const select = document.createElement('select');
   adapterOptions.forEach((a) => {
     const opt = document.createElement('option');
     opt.value = a.id;
-    opt.textContent = a.label;
+    opt.textContent = a.disabled ? `${a.label}（${a.reason}）` : a.label;
+    opt.disabled = a.disabled;
     select.appendChild(opt);
   });
   if (!adapterOptions.length) {
@@ -455,6 +553,8 @@ async function openModal(id) {
     select.appendChild(opt);
     select.disabled = true;
   }
+  const fallback = defaultAdapterId(item.kind);
+  if (fallback && [...select.options].some((o) => o.value === fallback)) select.value = fallback;
   actions.appendChild(select);
 
   const btn = (label, cls, handler) => {
@@ -466,12 +566,14 @@ async function openModal(id) {
     return b;
   };
 
-  btn('上传到该站点', 'primary', async () => {
+  const alreadyRemote = Boolean(item.remote?.url);
+  btn(alreadyRemote ? '转存到该站点' : '上传到该站点', 'primary', async () => {
     if (!select.value) {
       toast('请先到设置页启用并配置上传目标', true);
       return;
     }
-    await uploadOne(item.id, select.value);
+    if (alreadyRemote) await transferOne(item.id, select.value);
+    else await uploadOne(item.id, select.value);
   });
   btn(item.fav === 1 ? '取消收藏' : '收藏', '', async () => {
     await updateItem(item.id, { fav: item.fav === 1 ? 0 : 1 });
@@ -508,22 +610,54 @@ function closeModal() {
 
 /* ------------------------------ 操作 ------------------------------ */
 
-function availableAdapters() {
-  return state.adapters
-    .filter((a) => state.settings?.adapters?.[a.id]?.enabled)
-    .map((a) => ({ id: a.id, label: a.label }));
+/** 带启用态的适配器描述，供共享路由与名称解析使用 */
+function descriptors() {
+  return state.adapters.map((a) => ({
+    ...a,
+    enabled: state.settings?.adapters?.[a.id]?.enabled === true,
+  }));
 }
 
-function defaultAdapterId() {
-  const configured = state.settings?.autoUpload?.adapterId;
-  if (configured && configured !== 'none' && availableAdapters().some((a) => a.id === configured)) return configured;
-  return availableAdapters()[0]?.id || '';
+/** 下拉选项：已启用站点；不支持该类型的禁用并写明原因 */
+function adapterOptionsFor(kind) {
+  return state.adapters
+    .filter((a) => state.settings?.adapters?.[a.id]?.enabled)
+    .map((a) => ({
+      id: a.id,
+      label: a.label,
+      disabled: kind ? !adapterSupports(a, kind) : false,
+      reason: kind && !adapterSupports(a, kind) ? unsupportedReason(kind) : '',
+    }));
+}
+
+/** 按类型走共享路由解析默认站点 */
+function defaultAdapterId(kind) {
+  return resolveTargetAdapter(state.settings, kind, descriptors())?.id || '';
+}
+
+/** 适配器展示名；找不到时回退 id */
+function labelFor(adapterId) {
+  return adapterLabel(descriptors(), adapterId) || adapterId || '';
+}
+
+function makeChip(tag) {
+  const chip = document.createElement('button');
+  chip.className = `chip${state.tagFilter.has(tag) ? ' active' : ''}`;
+  chip.textContent = tag;
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.tagFilter.has(tag)) state.tagFilter.delete(tag);
+    else state.tagFilter.add(tag);
+    applyFilter();
+  });
+  return chip;
 }
 
 async function uploadOne(id, adapterId) {
-  const target = adapterId || defaultAdapterId();
+  const item = await getItem(id);
+  const target = adapterId || defaultAdapterId(item?.kind);
   if (!target) {
-    toast('还没有启用上传目标，先到设置页配置 GitHub / S3 / WebDAV', true, 3600);
+    toast('还没有启用上传目标，先到设置页配置站点', true, 3600);
     return;
   }
   showProgress('正在上传…', 0, 1);
@@ -531,7 +665,7 @@ async function uploadOne(id, adapterId) {
     const res = await runTask(TASK.UPLOAD, { id, adapterId: target }, (p) => {
       showProgress('正在上传…', p.done || 0, p.total || 1, p.message);
     });
-    toast(res.item?.remote?.url ? '上传完成，链接已保存' : '上传完成');
+    toast(res.item?.remote?.url ? `已上传到 ${labelFor(res.item.remote.adapterId)}，链接已保存` : '上传完成');
     await refresh();
   } catch (err) {
     toast(`上传失败：${err.message || err}`, true, 4000);
@@ -541,17 +675,33 @@ async function uploadOne(id, adapterId) {
   }
 }
 
-async function uploadSelected() {
-  const target = defaultAdapterId();
-  if (!target) {
-    toast('还没有启用上传目标，先到设置页配置', true, 3600);
+async function transferOne(id, adapterId) {
+  if (!adapterId) {
+    toast('请先选择目标站点', true);
     return;
   }
+  showProgress('正在转存…', 0, 1);
+  try {
+    const res = await runTask(TASK.TRANSFER, { id, adapterId }, (p) => {
+      showProgress('正在转存…', p.done || 0, p.total || 1, p.message);
+    });
+    toast(res.item?.remote?.url ? `已转存到 ${labelFor(res.item.remote.adapterId)}，历史记录已保留` : '转存完成');
+    await refresh();
+  } catch (err) {
+    toast(`转存失败：${err.message || err}`, true, 4000);
+    await refresh();
+  } finally {
+    hideProgress();
+  }
+}
+
+async function uploadSelected() {
   const ids = [...state.selected];
   if (!ids.length) return;
+  // 批量不指定固定站点：后台逐条按媒体类型走共享路由
   showProgress('批量上传中…', 0, ids.length);
   try {
-    const res = await runTask(TASK.UPLOAD_BATCH, { ids, adapterId: target }, (p) => {
+    const res = await runTask(TASK.UPLOAD_BATCH, { ids, adapterId: '' }, (p) => {
       showProgress('批量上传中…', p.done || 0, p.total || ids.length, p.message);
     });
     toast(`上传完成 ${res.ok} 个${res.failed ? `，失败 ${res.failed} 个` : ''}`, res.failed > 0, 3600);
@@ -666,6 +816,11 @@ function hideProgress() {
 
 function esc(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** 标签解析：中英文逗号/空白分隔，去重去空 */
+function parseTags(text) {
+  return [...new Set(String(text).split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean))];
 }
 function escapeAttr(str) {
   return esc(str).replace(/`/g, '&#96;');

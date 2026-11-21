@@ -40,10 +40,15 @@ export const DEFAULT_SETTINGS = {
     includeLazy: true,
     includeLinks: true,
   },
-  /** 入库后自动上传到哪个适配器；'none' 表示只存本地 */
+  /** 入库后自动上传到哪个适配器；'none'/空串 表示未指定，按路由顺序兜底 */
   autoUpload: {
     enabled: false,
     adapterId: 'none',
+    /** 按媒体类型单独指定站点；空串 = 跟随全局默认 adapterId */
+    byKind: {
+      image: '',
+      video: '',
+    },
   },
   /** 导入策略 */
   importRules: {
@@ -93,6 +98,26 @@ export const DEFAULT_SETTINGS = {
       responsePath: 'data.url',
       publicBase: '',
       maxMB: 10,
+    },
+    catbox: {
+      enabled: false,
+      userhash: '',
+    },
+    pixeldrain: {
+      enabled: false,
+      apiKey: '',
+    },
+    zeroxzero: {
+      enabled: false,
+      expires: 0,
+    },
+    imgbb: {
+      enabled: false,
+      apiKey: '',
+    },
+    imgur: {
+      enabled: false,
+      clientId: '',
     },
   },
 };

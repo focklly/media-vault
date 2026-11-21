@@ -24,11 +24,27 @@ import {
   putItem, getItem, updateItem, deleteItems, putBlob, getBlob, getAllItems, getStats,
 } from '../shared/db.js';
 import { getSettings, saveSettings, DEFAULT_SETTINGS, maxImportBytes } from '../shared/settings.js';
-import { uploadTo, testAdapter, adapterMetaList } from './adapters/index.js';
+import { resolveTargetAdapter, adapterLabel } from '../shared/routing.js';
+import { uploadTo, testAdapter, adapterMetaList, ADAPTERS, getAdapter } from './adapters/index.js';
 
 const LIBRARY_PAGE = 'src/library/library.html';
 const SETTINGS_PAGE = 'src/settings/settings.html';
 const ICON_128 = 'src/icons/icon-128.png';
+
+/** 组装路由/UI 共用的适配器描述（含启用态），纯数据、剥离函数 */
+function adapterDescriptors(settings) {
+  return ADAPTERS.map((a) => ({
+    id: a.id,
+    label: a.label,
+    supports: a.supports,
+    enabled: settings?.adapters?.[a.id]?.enabled === true,
+  }));
+}
+
+/** 按媒体类型解析目标站点（byKind → 全局兜底 → 第一个支持该类型的已启用站点） */
+function resolveTarget(settings, kind) {
+  return resolveTargetAdapter(settings, kind, adapterDescriptors(settings));
+}
 
 /* ------------------------------------------------------------------ *
  * 安装 / 启动
@@ -101,7 +117,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         },
         settings,
       );
-      notify('已存入个人空间', `${item.kind === 'video' ? '视频' : '图片'} · ${item.title}`);
+      const targetLabel = item.remote?.adapterId
+        ? adapterLabel(adapterDescriptors(settings), item.remote.adapterId)
+        : '';
+      notify('已存入个人空间', `${item.kind === 'video' ? '视频' : '图片'} · ${item.title}${targetLabel ? ` · 已上传到 ${targetLabel}` : ''}`);
       updateBadge(tab?.id, null);
     } catch (err) {
       notify('存入失败', String(err.message || err).slice(0, 120));
@@ -186,6 +205,10 @@ async function runTask(type, payload, progress) {
       return uploadOne(payload.id, payload.adapterId, settings);
     case TASK.UPLOAD_BATCH:
       return uploadMany(payload.ids, payload.adapterId, settings, progress);
+    case TASK.TRANSFER:
+      return payload.id
+        ? transferOne(await getItem(payload.id), payload.adapterId, settings).then((item) => ({ item }))
+        : transferMany(payload.ids, payload.adapterId, settings, progress);
     case TASK.TEST_ADAPTER:
       return testAdapter(payload.adapterId, payload.config);
     case TASK.DELETE:
@@ -218,8 +241,8 @@ async function importBatch(payload, settings, progress) {
         duplicates += 1;
       } else {
         seen.add(raw.url);
-        const { item } = await importMedia(raw, settings);
-        imported.push(item);
+        const importedOne = await importMedia(raw, settings);
+        imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
       }
     } catch (err) {
       failed.push({ url: raw.url, error: String(err.message || err) });
@@ -324,16 +347,19 @@ async function importMedia(raw, settings) {
   item.status = 'ready';
   await putItem(item);
 
-  // 自动上传（默认关闭）
-  if (settings.autoUpload?.enabled && settings.autoUpload.adapterId !== 'none') {
-    try {
-      const result = await uploadItemObject(item, settings.autoUpload.adapterId, settings);
-      return { item: result };
-    } catch (err) {
-      const next = await updateItem(item.id, {
-        remote: { adapterId: settings.autoUpload.adapterId, error: String(err.message || err), uploadedAt: nowISO() },
-      });
-      return { item: next || item, uploadError: String(err.message || err) };
+  // 自动上传（默认关闭）：按类型走共享路由，结果里带上目标站点名称供 toast/通知展示
+  if (settings.autoUpload?.enabled) {
+    const target = resolveTarget(settings, item.kind);
+    if (target) {
+      try {
+        const result = await uploadItemObject(item, target.id, settings);
+        return { item: result, targetLabel: target.label };
+      } catch (err) {
+        const next = await updateItem(item.id, {
+          remote: { adapterId: target.id, error: String(err.message || err), uploadedAt: nowISO() },
+        });
+        return { item: next || item, uploadError: String(err.message || err), targetLabel: target.label };
+      }
     }
   }
   return { item };
@@ -414,7 +440,9 @@ async function makeThumb(blob, kind = KIND.IMAGE) {
 async function uploadOne(id, adapterId, settings) {
   const item = await getItem(id);
   if (!item) throw new Error('条目不存在或已被删除');
-  const next = await uploadItemObject(item, adapterId, settings);
+  const targetId = adapterId || resolveTarget(settings, item.kind)?.id;
+  if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用站点');
+  const next = await uploadItemObject(item, targetId, settings);
   return { item: next };
 }
 
@@ -425,7 +453,10 @@ async function uploadMany(ids = [], adapterId, settings, progress) {
     try {
       const item = await getItem(id);
       if (!item) throw new Error('条目不存在');
-      const next = await uploadItemObject(item, adapterId, settings);
+      // 未显式指定站点时，逐条按类型走共享路由；都不满足则给出可读错误
+      const targetId = adapterId || resolveTarget(settings, item.kind)?.id;
+      if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用站点');
+      const next = await uploadItemObject(item, targetId, settings);
       results.push({ id, ok: true, url: next.remote?.url });
     } catch (err) {
       results.push({ id, ok: false, error: String(err.message || err) });
@@ -462,15 +493,98 @@ async function uploadItemObject(item, adapterId, settings) {
         privateLink: result.privateLink,
         uploadedAt: nowISO(),
         error: null,
+        // 保留之前站点的历史记录（正常重传也不清空）
+        history: item.remote?.history || [],
       },
     });
     return next || item;
   } catch (err) {
+    // 失败时保留旧 remote 的链接与历史，只追加错误标记，避免原记录被覆盖
+    const prev = item.remote || {};
     await updateItem(item.id, {
-      remote: { adapterId, url: '', path: '', uploadedAt: nowISO(), error: String(err.message || err) },
+      remote: { ...prev, adapterId, error: String(err.message || err), uploadedAt: nowISO() },
     });
     throw err;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 跨站转存
+ * ------------------------------------------------------------------ */
+
+/**
+ * 把条目搬到目标站点：优先用本地副本，没有本地副本时下载旧远程链接/来源链接。
+ * 成功后旧记录进入 remote.history[]；上传阶段失败不写库，原 remote 保持原样。
+ */
+async function transferOne(item, adapterId, settings) {
+  if (!item) throw new Error('条目不存在或已被删除');
+  const adapter = getAdapter(adapterId);
+  if (!adapter) throw new Error(`未知的存储适配器：${adapterId}`);
+  const config = settings.adapters?.[adapterId];
+  if (!adapter.isConfigured(config || {})) throw new Error(`「${adapter.label}」还没配置完整`);
+
+  let blob = item.files?.orig ? await getBlob(item.files.orig) : null;
+  let fileName = item.fileName;
+  let mime = item.mime || '';
+  if (!blob) {
+    const url = item.remote?.url || item.sourceUrl;
+    if (!url) throw new Error('本地没有副本，也没有可下载的远程链接，无法转存');
+    const fetched = await fetchMedia(url, item.pageUrl);
+    if (!fetched.ok) throw new Error(fetched.reason);
+    blob = fetched.blob;
+    mime = fetched.mime;
+    fileName = fileNameFromUrl(url, item.kind, mime);
+  }
+
+  // 上传成功前不触碰 IndexedDB，失败时原 remote 记录原样保留
+  const result = await uploadTo(adapterId, {
+    blob,
+    fileName,
+    mime: mime || blob.type,
+    kind: item.kind,
+    config,
+    item,
+  });
+
+  const history = [...(item.remote?.history || [])];
+  const prev = item.remote;
+  if (prev?.url) {
+    history.push({ adapterId: prev.adapterId, url: prev.url, at: prev.uploadedAt || nowISO() });
+    if (history.length > 20) history.splice(0, history.length - 20);
+  }
+
+  const next = await updateItem(item.id, {
+    remote: {
+      adapterId,
+      url: result.url,
+      path: result.path,
+      size: result.size,
+      privateLink: result.privateLink,
+      uploadedAt: nowISO(),
+      error: null,
+      history,
+    },
+  });
+  return next || item;
+}
+
+async function transferMany(ids = [], adapterId, settings, progress) {
+  const results = [];
+  let done = 0;
+  await mapLimit(ids, 2, async (id) => {
+    try {
+      const item = await getItem(id);
+      const next = await transferOne(item, adapterId, settings);
+      results.push({ id, ok: true, url: next.remote?.url });
+    } catch (err) {
+      results.push({ id, ok: false, error: String(err.message || err) });
+    } finally {
+      done += 1;
+      progress({ done, total: ids.length, message: `已处理 ${done}/${ids.length}` });
+    }
+  });
+  const okCount = results.filter((r) => r.ok).length;
+  return { results, ok: okCount, failed: results.length - okCount };
 }
 
 /* ------------------------------------------------------------------ *

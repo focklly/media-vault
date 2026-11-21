@@ -49,7 +49,7 @@
     ball: { enabled: true, x: 24, y: 96, opacity: 0.92 },
     hover: { enabled: true, minPx: 120, videos: true, offsetX: 14, offsetY: 14 },
     scan: { minPx: 80, maxItems: 600, includeBackground: true, includeMeta: true, includeLazy: true, includeLinks: true },
-    autoUpload: { enabled: false, adapterId: 'none' },
+    autoUpload: { enabled: false, adapterId: 'none', byKind: { image: '', video: '' } },
   };
 
   const state = {
@@ -1048,7 +1048,8 @@
       const item = result.imported && result.imported[0];
       if (item) {
         if (item.remote && item.remote.url) {
-          toast(`已存入并上传 · ${item.title}`);
+          const label = item.targetLabel ? ` · ${item.targetLabel}` : '';
+          toast(`已存入并上传${label} · ${item.title}`);
         } else {
           toast(opts.forceUpload ? `已存入本地（上传未完成，请到个人空间查看）` : `已存入个人空间 · ${item.title}`);
         }
@@ -1081,6 +1082,7 @@
       // 分批提交，避免单次消息过大；每批 40 条
       let imported = 0;
       let failed = 0;
+      const labels = new Set();
       for (let i = 0; i < items.length; i += 40) {
         const chunk = items.slice(i, i + 40);
         const res = await runTask(
@@ -1091,10 +1093,12 @@
             toast(`正在存入 ${Math.min(done, total)}/${total}…`, false, 60000);
           },
         );
+        (res.imported || []).forEach((it) => { if (it.targetLabel) labels.add(it.targetLabel); });
         imported += (res.imported || []).length;
         failed += (res.failed || []).length;
       }
-      toast(`完成：成功 ${imported} 个${failed ? `，失败 ${failed} 个` : ''}`, failed > 0, 3200);
+      const uploaded = labels.size ? ` · 已上传到 ${[...labels].join('、')}` : '';
+      toast(`完成：成功 ${imported} 个${failed ? `，失败 ${failed} 个` : ''}${uploaded}`, failed > 0, 3200);
       bumpBallCount(imported);
     } catch (err) {
       toast(`批量存入失败：${err.message || err}`, true, 3200);

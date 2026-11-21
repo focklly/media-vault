@@ -86,6 +86,7 @@
 | `import` | `{items:[媒体描述], openLibraryAfter?}` | `{imported:[item], failed:[{url,error}], duplicates}` |
 | `upload` | `{id, adapterId}` | `{item}`（item.remote 已写入） |
 | `upload-batch` | `{ids, adapterId}` | `{results:[{id,ok,url?,error?}], ok, failed}` |
+| `transfer` | `{id, adapterId}` 或 `{ids, adapterId}` | `{item}` 或 `{results:[{id,ok,url?,error?}], ok, failed}`；旧 remote 进入 `history[]` |
 | `test-adapter` | `{adapterId, config}` | `{ok, message}` |
 | `delete` | `{ids}` | `{removed}` |
 
@@ -128,10 +129,10 @@
 | `width` / `height` / `size` / `duration` | number | 分辨率、字节数、时长 |
 | `status` | `ready`/`link-only`/`pending` | `link-only` 表示只有记录没有本体 |
 | `fav` | 0/1 | IndexedDB 不能索引布尔值，用数字 |
-| `tags` | string[] | 预留（v1 未做 UI） |
+| `tags` | string[] | 标签；旧数据可能缺省，读取处兜底 `item.tags || []` |
 | `note` | string | 降级原因等 |
 | `files` | `{orig, thumb}` | Blob 存储键 |
-| `remote` | object/null | `{adapterId,url,path,size,privateLink,uploadedAt,error}` |
+| `remote` | object/null | `{adapterId,url,path,size,privateLink,uploadedAt,error,history}`；`history` 为旧站点记录 `{adapterId,url,at}[]`，旧数据可能缺省 |
 | `createdAt` / `updatedAt` | ISO string | 时间 |
 
 索引：`createdAt`、`kind`、`site`、`provider`、`status`、`fav`。
@@ -146,6 +147,14 @@
 | `size` / `mime` | 冗余元信息，便于统计与排查 |
 
 **为什么分表**：列表页只需要元数据；若把 Blob 塞进 item，每次 `getAll()` 会把整库媒体读进内存，几百 MB 就卡死。分表后列表渲染只读元数据，缩略图在卡片进入视口时才按 key 读取。
+
+### 3.3 标签数据模型
+
+- 标签存放在 `item.tags: string[]`，纯前端派生数据，不建索引；新增/改名/删除都直接写回该条目。
+- 录入规则：中英文逗号或空白分隔，去重去空；大小写与空格按原文保留。
+- 兼容旧数据：v1.0.0 及更早条目可能没有 `tags` 字段，所有读取处统一兜底 `item.tags || []`，不做破坏性迁移。
+- 筛选：卡片 chips 与「标签快捷筛选」行均为多选 **OR（任一命中）** 语义——条目只要命中任一选中标签就保留，不要求全部命中；搜索框关键字同样匹配标签文本。当前未提供 AND（全部命中）模式，如需改为 AND 应先评估使用场景再调整 `applyFilter()` 的交集判断。
+- 转存历史存放在 `item.remote.history: {adapterId,url,at}[]`，同样兜底 `item.remote?.history || []`；新记录成功写入后才追加，失败不写库。
 
 ---
 
@@ -202,6 +211,37 @@
 7. 统一 `absolute()` 补全相对地址、去重、按面积排序、截断到 `maxItems`。
 
 触发时机：首次 `document_idle + 700ms`；滚动停止 1.2s 重扫（最多 20 次）；popup/菜单手动「重新扫描」。扫描结果通过 `MV_SCAN_RESULT` 更新当前标签页角标。
+
+### 4.5 存储路由与默认站点
+
+自动上传与手动批量上传前，先由共享函数 `src/shared/routing.js` 的 `resolveTargetAdapter(settings, kind, adapters)` 解析目标站点，解析顺序：
+
+```text
+autoUpload.byKind[类型]   该类型单独指定的站点（空串/ none = 未指定）
+  → autoUpload.adapterId  全局兜底站点
+  → 第一个已启用且 supports 该类型的适配器
+```
+
+- 任一层命中的站点若不支持当前类型，继续向下兜底，而不是直接报错。
+- `adapters` 描述列表由调用方组装（SW 从 `ADAPTERS` + 设置启用态生成；页面从 `MV_GET_ADAPTER_META` 元数据 + 设置启用态生成），路由函数本身不依赖 chrome API，SW / content / popup / library 复用同一份逻辑。
+- 设置页提供「全局默认 + 图片默认 + 视频默认」三个下拉；不支持该类型的已启用站点显示为不可选并注明原因（如「不支持视频」）。
+- 解析结果的站点 label 会带进 toast / 通知文案；解析不到任何可用站点时，手动上传给出可读错误，自动上传则只存本地。
+
+### 4.6 跨站转存流程
+
+```text
+图库详情弹窗 → 选择目标站点 → 「转存到该站点」→ runTask('transfer', {id, adapterId})
+  → SW transferOne：
+      ① 取文件：优先本地 Blob（files.orig）；无本地副本时下载 remote.url 或 sourceUrl
+      ② uploadTo(目标适配器)：配置校验 → 体积校验 → 上传（成功前不写库）
+      ③ 旧 remote 记录 push 进 remote.history[]（{adapterId,url,at}，上限 20 条）
+      ④ 写入新 remote：{adapterId,url,path,size,privateLink,uploadedAt,error:null,history}
+  → 失败：抛可读错误，原 item.remote 保持原样，不覆盖旧链接与历史
+```
+
+- `transfer` 端口任务支持单条（`{id}`）与批量（`{ids}`），批量并发与上传一致（并发 2，逐条回 progress）。
+- 仅链接条目也可转存：从外部直链下载后再上传；源链接不可达时给出抓取失败原因。
+- 普通重传（`upload`）成功时同样保留已有 `history[]`；失败时保留旧 remote 字段，只追加 `error` 标记。
 
 ---
 

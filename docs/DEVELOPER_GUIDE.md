@@ -157,6 +157,16 @@ export const ADAPTERS = [github, s3, webdav, httpAdapter, example];
 
 `required: true` 只影响 UI 上的 `*` 标记，真正的校验在 `isConfigured()`。
 
+### 3.5 适配器实现三要点
+
+| 要点 | 约定 | 原因 |
+| --- | --- | --- |
+| `supports` | 声明 `['image']` / `['image','video']`；存储路由按它兜底，设置页与图库下拉据此禁用不兼容选项并写明原因 | 图片站（如 ImgBB）不能接收视频，混传会被远端拒绝 |
+| `maxBytes` | 单文件上限（字节），不限写 `Infinity`；`uploadTo()` 会在上传前统一校验并抛中文错误 | 各免费站点限制差异大（32MB～20GB），集中校验避免传一半失败 |
+| 上传体 | 文件用 `FormData` + `Blob`，或直接把 `blob` 作为原始二进制 body；**严禁先把文件 base64 再塞 multipart**；不要手动设置 multipart 的 `Content-Type`（浏览器/ SW 会自动带 boundary） | base64 膨胀约 33%，大视频容易超限；手动设头会丢失 boundary 导致解析失败 |
+
+> 上传返回值契约不变：`{ url, path, size, privateLink }`；`privateLink: true` 表示外链需登录，图库会标「私有」。
+
 ---
 
 ## 4. 修改扫描规则 / 悬停判定

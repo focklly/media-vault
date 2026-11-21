@@ -46,7 +46,7 @@
       <div class="topbar">
         <div class="search">
           <span>⌕</span>
-          <input id="search" type="search" placeholder="搜索标题、文件名、站点、来源页…" />
+          <input id="search" type="search" placeholder="搜索标题、文件名、站点、来源页、标签…" />
         </div>
         <div class="tools">
           <select id="sort">
@@ -65,11 +65,13 @@
         <span id="resultCount" class="muted"></span>
         <div class="bulk" id="bulkBar" hidden>
           <span id="selectedCount">已选 0 项</span>
-          <button id="bulkUpload" class="bulk-btn">上传到默认站点</button>
+          <button id="bulkUpload" class="bulk-btn">上传到站点</button>
           <button id="bulkDownload" class="bulk-btn">导出文件</button>
           <button id="bulkDelete" class="bulk-btn danger">删除</button>
         </div>
       </div>
+
+      <div class="tagrow" id="tagRow" hidden></div>
 
       <div class="grid-wrap">
         <div id="grid" class="grid"></div>
@@ -82,7 +84,7 @@
 
       <footer class="footer">
         <span id="footerStats">—</span>
-        <span>影图管家 v1.0.0 · <a href="https://github.com/focklly/media-vault" target="_blank" rel="noreferrer">GitHub 仓库</a></span>
+        <span>影图管家 v1.1.0 · <a href="https://github.com/focklly/media-vault" target="_blank" rel="noreferrer">GitHub 仓库</a></span>
       </footer>
     </main>
   </div>

@@ -5,11 +5,12 @@
  * 适配器表单完全由后台返回的 fields 元数据生成 —— 新增适配器不用改这个文件。
  */
 
-import { APP, TASK } from '../shared/constants.js';
+import { APP, TASK, KIND } from '../shared/constants.js';
 import { getSettings, saveSettings } from '../shared/settings.js';
 import { getStats, exportManifest, importManifest, clearAll } from '../shared/db.js';
 import { runTask, sendMessage } from '../shared/messaging.js';
 import { formatBytes } from '../shared/utils.js';
+import { adapterSupports, unsupportedReason } from '../shared/routing.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -127,40 +128,67 @@ function renderGeneral() {
   $('#swAuto').addEventListener('change', (e) => update({ autoUpload: { enabled: e.target.checked } }));
 
   renderDefaultSelect();
+
   $('#selectDefault').addEventListener('change', (e) => {
     update({ autoUpload: { adapterId: e.target.value, enabled: e.target.value !== 'none' ? true : state.settings.autoUpload.enabled } });
     $('#swAuto').checked = e.target.value !== 'none' ? true : state.settings.autoUpload.enabled;
   });
+  $('#selectDefaultImage').addEventListener('change', (e) => {
+    update({ autoUpload: { byKind: { image: e.target.value } } });
+  });
+  $('#selectDefaultVideo').addEventListener('change', (e) => {
+    update({ autoUpload: { byKind: { video: e.target.value } } });
+  });
 }
 
+/** 填充「全局 / 图片 / 视频」三个默认站点下拉；不支持该类型的站点禁用并写明原因 */
 function renderDefaultSelect() {
-  const select = $('#selectDefault');
+  const auto = state.settings?.autoUpload || {};
+  fillKindSelect($('#selectDefault'), null, auto.adapterId || 'none');
+  fillKindSelect($('#selectDefaultImage'), KIND.IMAGE, auto.byKind?.image || '');
+  fillKindSelect($('#selectDefaultVideo'), KIND.VIDEO, auto.byKind?.video || '');
+
+  const enabledCount = state.adapters.filter((a) => state.settings?.adapters?.[a.id]?.enabled).length;
+  $('#defaultHelp').textContent = enabledCount
+    ? `已启用 ${enabledCount} 个站点。入库后按「图片/视频默认 → 全局默认 → 第一个支持该类型的站点」路由，失败会在图库里标红。`
+    : '还没有启用任何站点：先到「上传目标」里开启一个，否则所有媒体只存本地。';
+}
+
+function fillKindSelect(select, kind, current) {
   if (!select) return;
-  const current = state.settings?.autoUpload?.adapterId || 'none';
   select.innerHTML = '';
-  const none = document.createElement('option');
-  none.value = 'none';
-  none.textContent = '仅本地（不上传）';
-  select.appendChild(none);
+
+  const sentinel = document.createElement('option');
+  if (kind) {
+    sentinel.value = '';
+    sentinel.textContent = '跟随全局默认';
+  } else {
+    sentinel.value = 'none';
+    sentinel.textContent = '仅本地（不上传）';
+  }
+  select.appendChild(sentinel);
+
   for (const meta of state.adapters) {
     const cfg = state.settings?.adapters?.[meta.id];
     if (!cfg?.enabled) continue;
     const opt = document.createElement('option');
     opt.value = meta.id;
-    opt.textContent = meta.label;
+    if (kind && !adapterSupports(meta, kind)) {
+      opt.disabled = true;
+      opt.textContent = `${meta.label}（${unsupportedReason(kind)}）`;
+    } else {
+      opt.textContent = meta.label;
+    }
     select.appendChild(opt);
   }
-  if (![...select.options].some((o) => o.value === current)) {
+
+  if (current && current !== 'none' && ![...select.options].some((o) => o.value === current)) {
     const opt = document.createElement('option');
     opt.value = current;
     opt.textContent = `${current}（未启用）`;
     select.appendChild(opt);
   }
-  select.value = current;
-  const enabledCount = state.adapters.filter((a) => state.settings?.adapters?.[a.id]?.enabled).length;
-  $('#defaultHelp').textContent = enabledCount
-    ? `已启用 ${enabledCount} 个站点。入库后自动上传会在后台执行，失败会在图库里标红。`
-    : '还没有启用任何站点：先到「上传目标」里开启一个，否则所有媒体只存本地。';
+  select.value = [...select.options].some((o) => o.value === current) ? current : sentinel.value;
 }
 
 /* ------------------------------ 适配器 ------------------------------ */

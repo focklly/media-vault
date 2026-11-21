@@ -7,7 +7,7 @@
 export const APP = {
   name: '影图管家',
   nameEn: 'MediaVault',
-  version: '1.0.0',
+  version: '1.1.0',
   repo: 'https://github.com/focklly/media-vault',
   docs: 'https://github.com/focklly/media-vault/tree/main/docs',
 };
@@ -39,6 +39,7 @@ export const TASK = {
   IMPORT: 'import',               // 批量导入（抓取 + 入库 + 可选上传）
   UPLOAD: 'upload',               // 单条上传到外部适配器
   UPLOAD_BATCH: 'upload-batch',   // 批量上传
+  TRANSFER: 'transfer',           // 跨站转存（把本地副本或旧远程链接搬到目标站点，保留历史）
   TEST_ADAPTER: 'test-adapter',   // 连接测试
   DELETE: 'delete',               // 批量删除
 };

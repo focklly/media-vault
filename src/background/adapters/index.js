@@ -12,8 +12,13 @@ import github from './github.js';
 import s3 from './s3.js';
 import webdav from './webdav.js';
 import httpAdapter from './http.js';
+import catbox from './catbox.js';
+import pixeldrain from './pixeldrain.js';
+import zeroxzero from './zeroxzero.js';
+import imgbb from './imgbb.js';
+import imgur from './imgur.js';
 
-export const ADAPTERS = [github, s3, webdav, httpAdapter];
+export const ADAPTERS = [github, s3, webdav, httpAdapter, catbox, pixeldrain, zeroxzero, imgbb, imgur];
 
 /** 供设置页渲染：剥离函数，只传可序列化的元数据 */
 export function adapterMetaList() {

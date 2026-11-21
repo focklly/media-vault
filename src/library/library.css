@@ -153,6 +153,37 @@ button, input, select { font: inherit; }
 .card-sub span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-fail { color: var(--err); font-size: 10px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* 站点角标：顶部居中，避开左上角类型标签与右上角多选框 */
+.site-badge {
+  position: absolute; left: 50%; top: 7px; transform: translateX(-50%);
+  max-width: 55%; padding: 2px 8px; border-radius: 6px;
+  background: rgba(5,9,20,.78); color: #c7d3ea; font-size: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+
+/* 标签 chips */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.chip {
+  padding: 2px 7px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: #aab8d8; font-size: 10px; cursor: pointer;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip:hover { border-color: #3f5079; color: #e6edfb; }
+.chip.active { background: rgba(99,102,241,.28); border-color: rgba(99,102,241,.6); color: #fff; }
+.chip.more { cursor: default; background: transparent; border-style: dashed; color: #7f93b6; }
+.chip.clear { border-style: dashed; color: #8fa0c2; }
+
+/* 标签快捷筛选行 */
+.tagrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 2px 10px; }
+.tagrow-label { color: var(--muted); font-size: 11px; margin-right: 2px; }
+
+/* 弹窗标签输入框 */
+.tags-row input.tag-input {
+  flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); color: var(--text); font-size: 12px;
+}
+.tags-row input.tag-input:focus { outline: 2px solid rgba(99,102,241,.4); outline-offset: 1px; }
+
 .empty { padding: 80px 20px; text-align: center; border: 1px dashed var(--line); border-radius: 16px; margin-top: 10px; }
 .empty-icon { font-size: 38px; color: #2f405f; margin-bottom: 10px; }
 .empty b { font-size: 14px; }
