@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>个人空间 · 影图管家</title>
+  <link rel="stylesheet" href="library.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="../icons/icon-48.png" alt="logo" />
+        <div>
+          <b>影图管家</b>
+          <span>个人空间</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-filter="all" class="nav-item active"><span class="ico">◫</span>全部<b data-count="all">0</b></button>
+        <button data-filter="image" class="nav-item"><span class="ico">▣</span>图片<b data-count="image">0</b></button>
+        <button data-filter="video" class="nav-item"><span class="ico">▶</span>视频<b data-count="video">0</b></button>
+        <div class="nav-sep"></div>
+        <button data-filter="favorite" class="nav-item"><span class="ico">★</span>收藏<b data-count="favorite">0</b></button>
+        <button data-filter="uploaded" class="nav-item"><span class="ico">☁</span>已上传<b data-count="uploaded">0</b></button>
+        <button data-filter="pending" class="nav-item"><span class="ico">◌</span>待上传<b data-count="pending">0</b></button>
+        <button data-filter="link" class="nav-item"><span class="ico">⚯</span>仅链接<b data-count="link">0</b></button>
+      </nav>
+
+      <div class="storage">
+        <div class="storage-head"><span>本地占用</span><b id="usedText">—</b></div>
+        <div class="bar"><i id="usageBar"></i></div>
+        <div class="storage-foot"><span id="usagePct">—</span><span id="totalText">—</span></div>
+      </div>
+
+      <div class="side-actions">
+        <button id="btnExport" class="side-btn">导出清单</button>
+        <button id="btnImport" class="side-btn">导入清单</button>
+        <button id="btnSettings" class="side-btn">扩展设置</button>
+      </div>
+      <input type="file" id="fileImport" accept="application/json,.json" hidden />
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="search">
+          <span>⌕</span>
+          <input id="search" type="search" placeholder="搜索标题、文件名、站点、来源页…" />
+        </div>
+        <div class="tools">
+          <select id="sort">
+            <option value="new">最新入库</option>
+            <option value="old">最早上传</option>
+            <option value="size">体积从大到小</option>
+            <option value="name">名称 A-Z</option>
+          </select>
+          <button id="btnSelectAll" class="tool-btn">全选</button>
+          <button id="btnRefresh" class="tool-btn" title="重新读取本地库">刷新</button>
+        </div>
+      </div>
+
+      <div class="filterbar">
+        <span id="filterLabel">全部媒体</span>
+        <span id="resultCount" class="muted"></span>
+        <div class="bulk" id="bulkBar" hidden>
+          <span id="selectedCount">已选 0 项</span>
+          <button id="bulkUpload" class="bulk-btn">上传到默认站点</button>
+          <button id="bulkDownload" class="bulk-btn">导出文件</button>
+          <button id="bulkDelete" class="bulk-btn danger">删除</button>
+        </div>
+      </div>
+
+      <div class="grid-wrap">
+        <div id="grid" class="grid"></div>
+        <div id="empty" class="empty" hidden>
+          <div class="empty-icon">◫</div>
+          <b>这里还没有内容</b>
+          <p>去任意网页把鼠标移到图片/视频上，点「存入个人空间」；<br/>也可以点右上角悬浮球的菜单批量存入。</p>
+        </div>
+      </div>
+
+      <footer class="footer">
+        <span id="footerStats">—</span>
+        <span>影图管家 v1.0.0 · <a href="https://github.com/focklly/media-vault" target="_blank" rel="noreferrer">GitHub 仓库</a></span>
+      </footer>
+    </main>
+  </div>
+
+  <!-- 预览详情 -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-mask" data-close></div>
+    <div class="modal-body">
+      <div class="modal-head">
+        <b id="mTitle">预览</b>
+        <button class="icon-btn" data-close title="关闭">×</button>
+      </div>
+      <div class="modal-preview" id="mPreview"></div>
+      <div class="modal-info" id="mInfo"></div>
+      <div class="modal-actions" id="mActions"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="library.js"></script>
+</body>
+</html>

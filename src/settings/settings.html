@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>设置 · 影图管家</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="../icons/icon-48.png" alt="logo" />
+      <div>
+        <b>影图管家 MediaVault</b>
+        <span>图片 / 视频管理扩展 · 设置</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="saveState" class="save-state">已自动保存</span>
+      <button id="btnLibrary" class="ghost-btn">打开个人空间</button>
+      <a id="repoLink" class="ghost-btn" href="#" target="_blank" rel="noreferrer">GitHub</a>
+    </div>
+  </header>
+
+  <div id="welcome" class="welcome" hidden>
+    <b>安装完成，先做两件事</b>
+    <p>① 在「拾取规则」里确认悬停按钮的最小尺寸；② 在「上传目标」里启用一个站点（GitHub 最省事，S3 最适合放视频）。不配置也能用，所有媒体会先存本地个人空间。</p>
+    <button id="welcomeClose" class="ghost-btn">知道了</button>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="general" class="tab active">通用</button>
+    <button data-tab="adapters" class="tab">上传目标</button>
+    <button data-tab="rules" class="tab">拾取规则</button>
+    <button data-tab="data" class="tab">数据与备份</button>
+    <button data-tab="about" class="tab">关于</button>
+  </nav>
+
+  <main class="panes">
+    <!-- 通用 -->
+    <section class="pane active" data-pane="general">
+      <div class="card">
+        <h2>页面浮层</h2>
+        <label class="switch-row">
+          <div><b>启用页面浮层（总开关）</b><small>关闭后所有网页都不显示悬浮球和悬停按钮，扩展图标仍可用</small></div>
+          <input type="checkbox" id="swEnabled" />
+        </label>
+        <label class="switch-row">
+          <div><b>显示悬浮球</b><small>关闭后仍可通过扩展图标使用</small></div>
+          <input type="checkbox" id="swBall" />
+        </label>
+        <label class="switch-row">
+          <div><b>悬停「存入个人空间」按钮</b><small>鼠标停在图片/视频上时，在光标旁出现按钮；按住 Shift 点击可直接上传</small></div>
+          <input type="checkbox" id="swHover" />
+        </label>
+        <label class="switch-row">
+          <div><b>视频也显示悬停按钮</b><small>部分播放器会被按钮遮挡，可单独关闭</small></div>
+          <input type="checkbox" id="swHoverVideo" />
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>入库与上传</h2>
+        <label class="switch-row">
+          <div><b>入库后自动上传</b><small>关闭时只存本地，可在图库里手动上传（推荐，稳定且省流量）</small></div>
+          <input type="checkbox" id="swAuto" />
+        </label>
+        <div class="field">
+          <label for="selectDefault">默认上传目标</label>
+          <select id="selectDefault"></select>
+          <p class="help" id="defaultHelp">只在「上传目标」中已启用的站点会出现在这里。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 上传目标 -->
+    <section class="pane" data-pane="adapters">
+      <p class="pane-tip">所有配置只保存在本机 <code>chrome.storage.local</code>，不会上传到任何服务器。密钥为明文存储，公共电脑请勿保存 Token。</p>
+      <div id="adapterList" class="adapter-list"></div>
+    </section>
+
+    <!-- 拾取规则 -->
+    <section class="pane" data-pane="rules">
+      <div class="card">
+        <h2>扫描范围</h2>
+        <div class="grid2">
+          <div class="field">
+            <label for="inMinPx">图片最小边长（px）</label>
+            <input type="number" id="inMinPx" min="16" max="600" step="10" />
+            <p class="help">小于该尺寸的图标、装饰图不会出现在清单里。</p>
+          </div>
+          <div class="field">
+            <label for="inMaxItems">单页最多收集（条）</label>
+            <input type="number" id="inMaxItems" min="50" max="2000" step="50" />
+            <p class="help">超大列表页建议 300–600，避免一次扫太多。</p>
+          </div>
+        </div>
+        <label class="switch-row"><div><b>扫描 CSS 背景图</b><small>很多站点用 background-image 放主视觉</small></div><input type="checkbox" id="swBg" /></label>
+        <label class="switch-row"><div><b>扫描 og:image / 分享图</b><small>补抓页面 meta 中的社交分享媒体</small></div><input type="checkbox" id="swMeta" /></label>
+        <label class="switch-row"><div><b>识别懒加载属性</b><small>data-src / data-original / data-srcset 等</small></div><input type="checkbox" id="swLazy" /></label>
+        <label class="switch-row"><div><b>收集视频直链</b><small>扫描 &lt;a&gt; 指向的 mp4/webm/m3u8</small></div><input type="checkbox" id="swLinks" /></label>
+      </div>
+
+      <div class="card">
+        <h2>悬停按钮</h2>
+        <div class="grid2">
+          <div class="field">
+            <label for="inHoverPx">出现按钮的最小边长（px）</label>
+            <input type="number" id="inHoverPx" min="40" max="800" step="10" />
+            <p class="help">太小会频繁弹出，太大则小图点不到。</p>
+          </div>
+          <div class="field">
+            <label for="inMaxMB">单文件上限（MB）</label>
+            <input type="number" id="inMaxMB" min="1" max="4096" step="10" />
+            <p class="help">超过上限只保存链接记录，不下载本体。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>排除站点</h2>
+        <div class="field">
+          <label for="txtExcluded">不显示浮层的站点（每行一个 hostname）</label>
+          <textarea id="txtExcluded" rows="6" placeholder="mail.google.com&#10;chromewebstore.google.com"></textarea>
+          <p class="help">支持子域匹配：填 <code>example.com</code> 会排除 <code>a.example.com</code>。修改后需刷新页面生效。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据 -->
+    <section class="pane" data-pane="data">
+      <div class="card">
+        <h2>本地库统计</h2>
+        <div class="stats" id="statGrid"></div>
+        <div class="row-actions">
+          <button id="btnExport" class="primary-btn">导出清单 JSON</button>
+          <button id="btnImport" class="ghost-btn">导入清单 JSON</button>
+          <button id="btnOpenLib" class="ghost-btn">打开个人空间</button>
+          <input type="file" id="fileImport" accept="application/json,.json" hidden />
+        </div>
+        <p class="help">导出的是元数据（标题、来源、上传链接），不含图片/视频本体。本体需要文件系统备份或依赖外部站点。</p>
+      </div>
+      <div class="card danger-card">
+        <h2>清空本地个人空间</h2>
+        <p class="help">删除所有条目与本地副本，已上传到外部站点的文件不受影响。此操作不可恢复。</p>
+        <button id="btnClear" class="danger-btn">清空全部数据</button>
+      </div>
+    </section>
+
+    <!-- 关于 -->
+    <section class="pane" data-pane="about">
+      <div class="card">
+        <h2>关于影图管家</h2>
+        <div class="about-grid">
+          <div><span>版本</span><b id="aboutVersion">—</b></div>
+          <div><span>浏览器要求</span><b>Chrome / Edge 116+</b></div>
+          <div><span>源码仓库</span><b><a id="aboutRepo" href="#" target="_blank" rel="noreferrer">—</a></b></div>
+          <div><span>文档目录</span><b><a id="aboutDocs" href="#" target="_blank" rel="noreferrer">docs</a></b></div>
+        </div>
+        <h3>权限说明</h3>
+        <ul class="perm-list">
+          <li><b>读取所有网页（http/https）</b>：用于发现页面上的图片/视频并下载原始文件；仅在你触发操作后使用。</li>
+          <li><b>storage / unlimitedStorage</b>：保存设置与个人空间媒体，容量不受单站点配额限制。</li>
+          <li><b>contextMenus / notifications / tabs / downloads</b>：右键菜单入库、完成后提示、打开图库、导出文件。</li>
+        </ul>
+        <h3>二次开发</h3>
+        <p class="help">完整架构、消息协议、适配器开发模板见仓库 <code>docs/</code>；改完代码在 <code>chrome://extensions</code> 点刷新即可，无需构建。</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

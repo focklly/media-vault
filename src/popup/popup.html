@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>影图管家</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="head">
+      <img src="../icons/icon-48.png" alt="logo" class="logo" />
+      <div class="title">
+        <b>影图管家</b>
+        <span>MediaVault · 图片 / 视频管家</span>
+      </div>
+      <button id="btnSettings" class="ghost" title="设置">⚙</button>
+    </header>
+
+    <section class="page-card">
+      <div class="page-title" id="pageTitle">当前页面</div>
+      <div class="counts">
+        <div class="count"><b id="imgCount">–</b><span>图片</span></div>
+        <div class="sep"></div>
+        <div class="count"><b id="vidCount">–</b><span>视频</span></div>
+        <div class="sep"></div>
+        <div class="count"><b id="totalCount">–</b><span>可下载</span></div>
+      </div>
+      <div class="page-actions">
+        <button id="btnScan" class="btn">重新扫描</button>
+        <button id="btnAll" class="btn primary">全部存入</button>
+      </div>
+      <div id="pageHint" class="hint"></div>
+    </section>
+
+    <section class="space">
+      <div class="section-head">
+        <b>个人空间</b>
+        <span id="spaceStats">—</span>
+        <button id="btnLibrary" class="link">打开图库 →</button>
+      </div>
+      <div id="recent" class="recent"></div>
+    </section>
+
+    <section class="settings-quick">
+      <label class="row">
+        <span>页面悬浮球</span>
+        <input type="checkbox" id="toggleBall" />
+      </label>
+      <label class="row">
+        <span>悬停「存入」按钮</span>
+        <input type="checkbox" id="toggleHover" />
+      </label>
+      <label class="row">
+        <span>入库后自动上传</span>
+        <input type="checkbox" id="toggleAuto" />
+      </label>
+      <div class="row target">
+        <span>上传目标</span>
+        <span id="targetName" class="target-name">仅本地</span>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span id="quota">本地占用 —</span>
+      <span id="version">v1.0.0</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

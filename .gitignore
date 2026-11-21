@@ -1,0 +1,19 @@
+# 构建与分发产物
+dist/
+*.zip
+
+# 依赖与编辑器
+node_modules/
+.vscode/
+.idea/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 密钥/本地配置（如有人把 token 写进脚本，禁止提交）
+*.env
+*.env.local
+secrets.json
