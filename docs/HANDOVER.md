@@ -44,10 +44,10 @@
 | 适配器 ×4 | ✅ 完成 | GitHub / S3(SigV4) / WebDAV / HTTP |
 | 右键菜单 / 通知 / 角标 | ✅ 完成 | |
 | 文档与交接 | ✅ 完成 | 本文件 |
-| 自动化 E2E 测试 | ❌ 未做 | 手动验收清单见第 3 节 |
+| 自动化 E2E 冒烟 | ✅ 通过 | Edge 真机 + CDP 脚本 13/13 断言全绿；尚未接入 CI |
 | 商店上架素材 | ❌ 未做 | 需要截图与隐私政策 URL |
 
-> **如实说明**：所有源码已通过 `node --check` 语法基准校验，但浏览器内的真实交互（悬浮球拖拽、悬停定位、图库渲染、S3 上传）尚未在本机自动化环境中跑过 E2E，必须按第 3 节人工验收一次再对外交付。
+> **如实说明**：源码已通过 `node --check` 语法校验，并在 Edge 真机上跑过一次 CDP E2E 冒烟（Service Worker 启动、4 个适配器 26 个字段渲染、content 注入、悬浮球计数、悬停按钮、点击入库、IndexedDB 写入、图库卡片与缩略图、弹窗读库，共 13 项断言全绿）。但拖拽手感、复杂站点兼容、S3/WebDAV 真实上传仍需按第 3 节人工验收一次；E2E 脚本尚未入库。
 
 ---
 
@@ -156,6 +156,8 @@
 - 发版：同步改 `manifest.json version` 与 `constants.js APP.version` → 更新 `CHANGELOG.md` → `git tag vX.Y.Z` → push tags。
 - CI：push / PR 自动执行 `tools/check.ps1`（语法 + manifest + 图标）。红了先修复。
 - 当前同步方式：AI 助手通过 GitHub 连接器逐文件提交；人工开发用标准 `git push`，产物一致。
+- v1.0.0 的首个增量（42 个文件，含二进制 PNG 图标）通过一次性导入流程落到 `main`；本地仓库另有 1 个 `feat: initial MediaVault v1.0.0` 提交，内容与远端一致。若本地 `git push` 报 `non-fast-forward`，先 `git fetch origin`，再 `git reset --soft origin/main` 重新提交即可（不要强推）。
+- 本机若出现 `Failed to connect to github.com port 443`：说明 git 直连被重置（`curl https://github.com` 仍 200 是正常的），改用 GitHub 网页上传/连接器推送，或配置代理后再 `git push`。
 
 ---
 
