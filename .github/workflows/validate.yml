@@ -1,0 +1,41 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run checks (syntax + manifest + icons + html refs)
+        shell: pwsh
+        run: ./tools/check.ps1
+
+      - name: Regenerate icons (reproducibility guard)
+        shell: pwsh
+        run: |
+          node tools/make-icons.mjs
+          git diff --exit-code -- src/icons
+
+      - name: Package extension
+        shell: pwsh
+        run: ./tools/pack.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-vault-package
+          path: dist/*.zip
+          if-no-files-found: error
