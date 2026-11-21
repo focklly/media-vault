@@ -1,1 +1,9 @@
-Sat Nov 21 22:00:52 UTC 2026
+curl_exit=0
+http=200 size=131272 time=2.651091
+head_err:
+
+bytes=131272
+/tmp/src.zip: Zip archive data, made by v2.0, extract using at least v2.0, last modified Nov 22 2026 05:13:42, uncompressed size 248, method=deflate
+    testing: tools/pack.ps1           OK
+    testing: tools/testbed.html       OK
+No errors detected in compressed data of /tmp/src.zip.
