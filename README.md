@@ -5,6 +5,10 @@
 > 仓库：<https://github.com/focklly/media-vault>
 > 版本：v1.0.0 ｜ 浏览器：Chrome / Edge 116+
 
+![悬浮球与悬停按钮](docs/images/e2e-hover-pill.png)
+
+*实机截图：右下角渐变悬浮球（角标为扫描到的媒体数），鼠标悬停在图片上时出现「存入个人空间 · 图片」*
+
 ---
 
 ## 它解决什么问题
