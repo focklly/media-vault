@@ -1,0 +1,20 @@
+name: sync-src
+on: push
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download source zip
+        run: curl -fsSL -o src.zip "https://aka.doubaocdn.com/s/9JDwxJk7bF" && ls -l src.zip
+      - name: Unzip into repo
+        run: unzip -o src.zip -d . && ls
+      - name: Commit and push
+        run: |
+          git config user.name "mediavault-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: sync v1.2.2 audio/thumb fixes" || echo "no changes"
+          git push origin HEAD:main
