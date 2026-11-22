@@ -368,7 +368,7 @@ async function importBatch(payload, settings, progress) {
         if (canUpgrade) {
           existing.splice(existing.indexOf(sameVideo), 1);
           await deleteItems([sameVideo.id]);
-          const importedOne = await importMedia(raw, settings);
+          const importedOne = await importMedia(raw, settings, (m) => progress({ done, total, message: m }));
           imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
         } else {
           // 已经有这条视频时，顺手补齐作者/字幕等元信息（不重复下载文件）
@@ -383,14 +383,14 @@ async function importBatch(payload, settings, progress) {
         if (canUpgrade) {
           existing.splice(existing.indexOf(dup), 1);
           await deleteItems([dup.id]);
-          const importedOne = await importMedia(raw, settings);
+          const importedOne = await importMedia(raw, settings, (m) => progress({ done, total, message: m }));
           imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
         } else {
           duplicates += 1;
         }
       } else {
         seen.add(raw.url);
-        const importedOne = await importMedia(raw, settings);
+        const importedOne = await importMedia(raw, settings, (m) => progress({ done, total, message: m }));
         imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
       }
     } catch (err) {
@@ -408,7 +408,8 @@ async function importBatch(payload, settings, progress) {
 /**
  * 单条媒体入库：抓取 -> 缩略图 -> IndexedDB -> 可选自动上传
  */
-async function importMedia(raw, settings) {
+async function importMedia(raw, settings, onStage = null) {
+  const stage = (msg) => { if (onStage) onStage(msg); };
   const kind = raw.kind === KIND.VIDEO ? KIND.VIDEO : KIND.IMAGE;
   const url = raw.url;
   const pageUrl = raw.pageUrl || raw.referer || '';
@@ -445,9 +446,11 @@ async function importMedia(raw, settings) {
   // content 侧已经把 blob: 视频转成 dataUrl 的情况
   let blob = null;
   if (raw.dataUrl) {
+    stage('正在读取页面内媒体…');
     blob = dataUrlToBlob(raw.dataUrl);
     item.mime = blob.type || raw.mime || '';
   } else if (raw.bilibiliResolve) {
+    stage('正在解析 B 站视频地址…');
     // B 站等 MSE 站点：页面里只有 blob:，改走 playurl 拿真正的 mp4 直链
     const resolved = await resolveBilibiliVideo(pageUrl);
     if (!resolved) {
@@ -456,6 +459,7 @@ async function importMedia(raw, settings) {
       await putItem(item);
       return { item, linkOnly: true };
     }
+    stage('正在下载视频文件…');
     const fetched = await fetchMedia(resolved.url, resolved.referer);
     if (!fetched.ok) {
       item.status = 'link-only';
@@ -482,6 +486,7 @@ async function importMedia(raw, settings) {
       }
     } catch (_) { /* 字幕失败不影响视频 */ }
   } else if (raw.douyinCandidates && raw.douyinCandidates.length) {
+    stage('正在解析抖音视频…');
     // 抖音：探针抓到的是 m4s 分轨，先读轨道头部（顺带拿 vid），
     // 再用 play 接口换取音视频合轨的渐进式 mp4，避免存下来没声音。
     const resolved = await resolveDouyinVideo(raw.douyinCandidates);
@@ -506,12 +511,14 @@ async function importMedia(raw, settings) {
       item.note = '抖音只拿到视频轨（无音轨），播放时会没声音；建议换条视频重试';
     }
   } else if (raw.stream) {
+    stage('正在保存链接记录…');
     // m3u8 / mpd 分片流，扩展无法整体下载，保存为“流媒体记录”
     item.status = 'link-only';
     item.note = '流媒体（m3u8/mpd），已保存播放地址；批量下载需配合专用工具';
     await putItem(item);
     return { item, linkOnly: true };
   } else {
+    stage('正在下载文件…');
     const maxBytes = maxImportBytes(settings);
     const fetched = await fetchMedia(url, pageUrl);
     if (!fetched.ok) throw new Error(fetched.reason);
@@ -529,6 +536,7 @@ async function importMedia(raw, settings) {
     item.fileName = `${kind}-${id.slice(-6)}.${item.mime ? extFromMime(item.mime) : 'bin'}`;
   }
   item.size = blob.size;
+  stage('正在生成缩略图…');
   const origKey = `${id}:orig`;
   await putBlob(origKey, id, blob);
   item.files.orig = origKey;
@@ -555,23 +563,35 @@ async function importMedia(raw, settings) {
 
   item.status = 'ready';
   await putItem(item);
+  notifyLibraryChanged(item.id);
+  stage('');
 
-  // 自动上传（默认关闭）：按类型走共享路由，结果里带上目标站点名称供 toast/通知展示
+  // 自动上传（默认开启）：按类型走共享路由，结果里带上目标站点名称供 toast/通知展示
   if (settings.autoUpload?.enabled) {
     const target = resolveTarget(settings, item.kind);
     if (target) {
+      stage(`正在上传到 ${target.label}…`);
       try {
-        const result = await uploadItemObject(item, target.id, settings);
+        const result = await uploadItemObject(item, target.id, settings, (p) => stage(p.message || '正在上传…'));
+        notifyLibraryChanged(item.id);
         return { item: result, targetLabel: target.label };
       } catch (err) {
         const next = await updateItem(item.id, {
           remote: { adapterId: target.id, error: String(err.message || err), uploadedAt: nowISO() },
         });
+        notifyLibraryChanged(item.id);
         return { item: next || item, uploadError: String(err.message || err), targetLabel: target.label };
       }
     }
   }
   return { item };
+}
+
+/** 通知所有打开着的图库页（含抽屉里的 iframe）刷新，解决「存完侧栏还是空」 */
+function notifyLibraryChanged(id) {
+  try {
+    chrome.runtime.sendMessage({ type: 'MV_LIBRARY_CHANGED', id }).catch(() => {});
+  } catch (_) { /* 没有图库页打开时会报错，忽略 */ }
 }
 
 function ensureExt(name, mime, url) {
@@ -1015,3 +1035,5 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 globalThis.__MV_STATS__ = () => getStats();
 globalThis.__MV_DEFAULTS__ = DEFAULT_SETTINGS;
 globalThis.__MV_STORAGE_KEY__ = STORAGE_KEY;
+
+

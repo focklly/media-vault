@@ -70,13 +70,18 @@ async function init() {
       refresh().catch(() => {});
     }
   });
-  await refresh();
-  // 同一个视频页可能被扫/存过多次，打开图库时自动合并，只留最完整的一条
+  // 后台存完一条（下载/入库/直传结束）都会广播一次，抽屉开着也能自动看到新内容
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (!msg || msg.type !== 'MV_LIBRARY_CHANGED') return;
+      if (state._changeTimer) clearTimeout(state._changeTimer);
+      state._changeTimer = setTimeout(() => refresh().catch(() => {}), 400);
+    });
+  } catch (_) { /* 非扩展环境打开时不支持 */ }
+  // 同一个视频页可能被扫/存过多次，先合并再去首屏渲染，只画一次网格
   const deduped = await sendMessage('MV_DEDUPE_LIBRARY');
-  if (deduped && deduped.removed) {
-    toast(`已合并 ${deduped.removed} 条重复视频`);
-    await refresh();
-  }
+  await refresh();
+  if (deduped && deduped.removed) toast(`已合并 ${deduped.removed} 条重复视频`);
 }
 
 function bindUI() {
@@ -179,14 +184,17 @@ async function ensureVideoThumbs() {
     .filter((i) => i.kind === KIND.VIDEO && i.files?.orig && !thumbTried.has(i.id))
     .slice(0, 3);
   if (!todo.length) return;
+  let changed = false;
   for (const it of todo) {
     thumbTried.add(it.id);
     try {
       const blob = await getBlob(it.files.orig);
       if (!blob) continue;
       const frame = await captureFirstFrame(blob);
-      if (!frame) continue;
-      await sendMessage(MSG.SET_VIDEO_THUMB, { id: it.id, dataUrl: frame });
+      if (frame) {
+        await sendMessage(MSG.SET_VIDEO_THUMB, { id: it.id, dataUrl: frame });
+        changed = true;
+      }
       // 顺手判断有没有音轨：抖音分轨下载的旧文件可能只有画面
       try {
         const head = await blob.slice(0, 65536).arrayBuffer();
@@ -194,12 +202,13 @@ async function ensureVideoThumbs() {
         let text = '';
         for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
         const hasAudio = text.includes('soun');
-        if (!hasAudio && it.audioMissing !== true) await updateItem(it.id, { audioMissing: true });
-        if (hasAudio && it.audioMissing === true) await updateItem(it.id, { audioMissing: false });
+        if (!hasAudio && it.audioMissing !== true) { await updateItem(it.id, { audioMissing: true }); changed = true; }
+        if (hasAudio && it.audioMissing === true) { await updateItem(it.id, { audioMissing: false }); changed = true; }
       } catch (_) { /* 读不了头部就算了 */ }
-      await refresh();
     } catch (_) { /* 抽帧失败就保持占位，不影响其他条目 */ }
   }
+  // 抽完再统一刷一次，避免每张视频卡都重建一遍网格
+  if (changed) await refresh();
 }
 
 function captureFirstFrame(blob) {
@@ -361,9 +370,69 @@ async function renderStorage() {
 
 function renderGrid() {
   const grid = $('#grid');
+  const list = state.filtered;
+  // 增量更新：条目集合与顺序没变时只改变化的那几张卡，
+  // 不再清空 grid 重建，避免打开/刷新时整页闪一下
+  const ids = [...grid.children].map((el) => el.dataset.id);
+  if (ids.length && ids.length === list.length && ids.every((id, i) => id === list[i].id)) {
+    $('#empty').hidden = true;
+    patchCards(list);
+    return;
+  }
+  renderGridFull(list);
+}
+
+function patchCards(list) {
+  const grid = $('#grid');
+  const cards = [...grid.children];
+  list.forEach((item, i) => {
+    const card = cards[i];
+    if (!card) return;
+    card.classList.toggle('selected', state.selected.has(item.id));
+    const nameEl = card.querySelector('.card-name');
+    if (nameEl && nameEl.textContent !== (item.title || item.fileName || '')) {
+      nameEl.textContent = item.title || item.fileName || '';
+      nameEl.title = item.title || item.fileName || '';
+    }
+    const sub = card.querySelectorAll('.card-sub span');
+    if (sub.length >= 3) {
+      sub[0].textContent = formatBytes(item.size || 0);
+      sub[2].textContent = item.site || '—';
+    }
+    // 云状态、站点角标、失败提示这类状态位按需刷新
+    const thumb = card.querySelector('.thumb');
+    if (thumb) {
+      const cloud = thumb.querySelector('.cloud');
+      const wantCloud = Boolean(item.remote?.url);
+      if (wantCloud && !cloud) {
+        const span = document.createElement('span');
+        span.className = 'cloud';
+        span.textContent = item.remote.privateLink ? '已上传·私有' : '已上传';
+        thumb.appendChild(span);
+      } else if (!wantCloud && cloud) {
+        cloud.remove();
+      }
+      const siteBadge = thumb.querySelector('.site-badge');
+      if (siteBadge) {
+        const text = item.remote?.url ? labelFor(item.remote.adapterId) : '本地';
+        if (siteBadge.textContent !== text) siteBadge.textContent = text;
+      }
+      // 缩略图换了（后台重抽首帧）才重建图片区
+      const key = item.files?.thumb || '';
+      if (key && thumb.dataset.thumbKey !== key) {
+        thumb.dataset.thumbKey = key;
+        thumb.querySelector('img')?.remove();
+        if (!thumb.querySelector('.ph')) thumb.appendChild(placeholder(item.kind));
+        state.observer?.observe(thumb);
+      }
+    }
+  });
+}
+
+function renderGridFull(list) {
+  const grid = $('#grid');
   cleanupThumbs();
   grid.innerHTML = '';
-  const list = state.filtered;
 
   $('#empty').hidden = list.length > 0;
   if (state.observer) state.observer.disconnect();

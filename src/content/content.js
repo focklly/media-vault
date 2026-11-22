@@ -277,8 +277,7 @@
 /* 个人空间：右侧抽屉，宽度可拖动调整 */
 .mv-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 420px; min-width: 300px; max-width: 96vw;
   pointer-events: auto; display: none; flex-direction: column;
-  background: rgba(9,14,26,.97); backdrop-filter: blur(18px) saturate(150%);
-  border-left: 1px solid rgba(120,140,200,.3); box-shadow: -22px 0 60px rgba(3,7,18,.55);
+  background: #080e1c; border-left: 1px solid rgba(120,140,200,.3); box-shadow: -22px 0 60px rgba(3,7,18,.55);
   transform: translateX(102%); transition: transform .22s ease-out; }
 .mv-drawer.mv-open { display: flex; transform: none; }
 .mv-drawer-frame { flex: 1; width: 100%; border: 0; background: #0b1120; transition: opacity .18s ease-out; }
@@ -962,6 +961,19 @@
     state.els.drawer.style.width = `${Math.max(300, Math.min(w, max))}px`;
   }
 
+  /** 预加载 / 首次加载抽屉里的图库页；加载完成前保持透明，避免白屏闪一下 */
+  function preloadLibraryFrame() {
+    const frame = state.els.drawer.querySelector('.mv-drawer-frame');
+    if (frame.dataset.loaded) return;
+    frame.dataset.loaded = '1';
+    frame.style.opacity = '0';
+    frame.addEventListener('load', () => {
+      frame.dataset.ready = '1';
+      if (isLibraryOpen()) frame.style.opacity = '1';
+    }, { once: true });
+    frame.src = `${chrome.runtime.getURL('src/library/library.html')}?embed=1`;
+  }
+
   function openLibraryDrawer() {
     const { drawer } = state.els;
     const frame = drawer.querySelector('.mv-drawer-frame');
@@ -969,11 +981,9 @@
     // 只在第一次打开时加载 iframe；之后直接复用并让页面自己刷新，
     // 避免每次重新加载导致的白屏/闪烁
     if (!frame.dataset.loaded) {
-      frame.dataset.loaded = '1';
-      frame.style.opacity = '0';
-      frame.addEventListener('load', () => { frame.style.opacity = '1'; }, { once: true });
-      frame.src = `${chrome.runtime.getURL('src/library/library.html')}?embed=1`;
-    } else {
+      preloadLibraryFrame();
+    } else if (frame.dataset.ready) {
+      frame.style.opacity = '1';
       try { frame.contentWindow.postMessage({ type: 'MV_REFRESH_LIBRARY', at: Date.now() }, '*'); } catch (_) { /* 忽略 */ }
     }
     drawer.classList.add('mv-open');
@@ -1162,6 +1172,14 @@
     return /(^|\.)bilibili\.com$/i.test(location.hostname);
   }
 
+  /** 只有「单个视频播放页」才能用 playurl 解析，首页/列表页里的播放器不是一条完整视频 */
+  function isBilibiliVideoPage() {
+    if (!isBilibiliPage()) return false;
+    return /\/video\/BV[0-9A-Za-z]+/i.test(location.pathname)
+      || /bvid=/i.test(location.href)
+      || /\/bangumi\/play\//i.test(location.pathname);
+  }
+
   function isDouyinPage() {
     return /(^|\.)(douyin\.com|iesdouyin\.com)$/i.test(location.hostname);
   }
@@ -1315,11 +1333,12 @@
 
   /** 平台专用解析：B 站走 playurl，抖音走探针直链；返回 true 表示已拿到可下载地址 */
   async function applyPlatformPayload(payload) {
-    if (isBilibiliPage()) {
+    if (isBilibiliVideoPage()) {
       payload.url = location.href;
       payload.bilibiliResolve = true;
       return true;
     }
+    if (isBilibiliPage()) return false;
     if (isDouyinPage()) {
       const douyinUrl = await douyinVideoUrlsReady();
       if (douyinUrl.length) {
@@ -1344,9 +1363,13 @@
     const { pill } = state.els;
     setWorking(true);
     pill.classList.add('mv-loading');
+    // 立刻给反馈：后面的下载/入库/直传可能要几十秒，先别让用户以为没点到
+    toast(`正在存入${media.kind === KIND.VIDEO ? '视频' : '图片'}…`, false, 60000);
     try {
       const payload = buildPayload(media);
-      const preferResolve = media.kind === KIND.VIDEO && media.blobUrl && (isBilibiliPage() || isDouyinPage());
+      // B 站视频播放页 / 抖音：页面里的 url 往往只是播放器壳子或 iframe，
+      // 统一交给平台接口拿真文件（顺带补作者、字幕），别去下那个 HTML
+      const preferResolve = media.kind === KIND.VIDEO && (isBilibiliVideoPage() || isDouyinPage());
       if (preferResolve) {
         // 这些站点的 blob 只是播放器壳子，交给平台接口拿到真文件
         await applyPlatformPayload(payload);
@@ -1365,6 +1388,10 @@
       const result = await runTask(TASK.IMPORT, {
         items: [payload],
         openLibraryAfter: false,
+      }, (p = {}) => {
+        // 后台按阶段回报：正在解析…/正在下载…/正在生成缩略图…/正在上传…
+        const stage = p.message && !/^https?:/i.test(p.message) ? p.message : '';
+        if (stage) toast(stage, false, 60000);
       });
       const item = result.imported && result.imported[0];
       if (!item && result.failed && result.failed.length) {
@@ -1504,6 +1531,9 @@
 
     // 首屏扫描 + 滚动触发懒加载重扫
     scheduleScan(700);
+    // 空闲时预加载抽屉里的图库页：第一次点「打开个人空间」就不用再等整页加载
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
+    idle(() => { try { preloadLibraryFrame(); } catch (_) { /* 忽略 */ } }, { timeout: 4000 });
     window.addEventListener('scroll', () => {
       if (state.scrollScans > 20) return;
       clearTimeout(state.scrollTimer);
