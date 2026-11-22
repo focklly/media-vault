@@ -9,14 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch source zip
+      - name: Fetch and stage source
         run: |
           curl -fsSL -A "Mozilla/5.0" -o /tmp/src.zip "https://aka.doubaocdn.com/s/XtbVuCjevL"
-          unzip -o -q /tmp/src.zip -d .
+          rm -rf /tmp/src && mkdir -p /tmp/src
+          unzip -o -q /tmp/src.zip -d /tmp/src
+          ls -la /tmp/src
+          for item in src docs tools manifest.json README.md CHANGELOG.md CONTRIBUTING.md LICENSE; do
+            if [ -e "/tmp/src/$item" ]; then rm -rf "./$item"; cp -r "/tmp/src/$item" "./$item"; fi
+          done
+          git status --short | head -40
       - name: Commit and push
         run: |
-          git config user.name "MediaVault Bot"
-          git config user.email "bot@mediavault.local"
-          git add -A -- . ':!.github/workflows'
-          git commit -m "chore: sync v1.2.0 source" || echo "no changes"
-          git push
+          git config user.name "media-vault-bootstrap"
+          git config user.email "bootstrap@users.noreply.github.com"
+          git add -A -- . ':(exclude).github'
+          git commit -m "feat(v1.2.0): imgdb.io + Unlockify built-in, compact settings UI" || echo "no changes"
+          git push origin HEAD:main
