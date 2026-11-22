@@ -1,6 +1,6 @@
 # 存储适配器配置手册（Adapters）
 
-> 十六个内置适配器都能在「设置 → 上传目标」里启用。全部配置只存本机，**不需要任何后端**。
+> 十五个内置适配器（14 个直传 + 1 个网页入口）都能在「设置 → 上传目标」里启用。全部配置只存本机，**不需要任何后端**。
 > 每个适配器都有「测试」按钮；失败信息会给出中文原因。v1.2 起卡片为紧凑单行，配置项在「展开」里。
 
 ---
@@ -26,10 +26,10 @@
 | Wistia | 视频 | 免费版有视频数量限制 | 播放页可公开 |
 | Catbox | 图片、视频 | 单文件 ≤200MB，永久保留 | 可以（匿名直链） |
 | Pixeldrain | 视频、大文件 | 单文件 ≤20GB，至少保留约两个月 | 可以（下载直链） |
-| 0x0.st | 临时分享（实验性） | 单文件 ≤512MB | 扩展内不可用，见该节 |
+| ImgPile | 图片 / 短视频 | 单文件 ≤97MB，开发者 API Key（Bearer） | 可以 |
 | ImgBB | 图片 | 单图 ≤32MB | 可以 |
 | Imgur | 图片、GIF、短视频 | 单文件约 ≤200MB，视频 ≤60s | 可以 |
-| ImgPile / YourImageShare / Hippo | 手动网页上传 | 单文件 97MB / 200MB / 账号额度 | 可以 |
+| YourImageShare | 视频、大文件 | 单文件 ≤200MB，端点与鉴权头可自定义 | 可以 |
 
 ---
 
@@ -331,43 +331,52 @@
 
 ---
 
-## 0x0.st 临时文件床（实验性，默认关闭）
+## ImgPile 图床（开发者 API Key）
 
-<a id="zeroxzero"></a>
+<a id="imgpile"></a>
 
-**原理**：`multipart/form-data` POST 到 0x0.st，返回纯文本直链。定位是临时分享，不适合长期归档。
+**原理**：官方开发者接口 `POST https://imgpile.com/uploads`，请求头 `Authorization: Bearer <IMGPILE_KEY>`，body 直接放文件原始字节（不是 multipart），可选 `?filename=xxx.png` 指定文件名。成功返回 `201`：
 
-### 先说结论：扩展内不可用
+```json
+{"data":{"slug":"...","pageUrl":"https://imgpile.com/i/...","filename":"...","ext":"png",
+         "urls":{"original":"https://cdn.imgpile.com/...","thumb":"...","sm":"...","lg":"..."}}}
+```
 
-实测（2026-11，同一台机器）：
+扩展取 `data.urls.original` 作为直链。
 
-| 请求 UA | 响应 |
-| --- | --- |
-| 浏览器 UA | **418**（站点按政策拒绝浏览器 UA） |
-| `MediaVault/1.2.0` 或 `curl/8.x` | **500** |
+**Key 获取**：<https://imgpile.com/developers>（登录后在开发者页创建 Key）。
 
-而浏览器**不允许**脚本设置 `User-Agent`（属于 forbidden header），所以扩展发出的请求一定是浏览器 UA → 必然被拒。因此 v1.2 把 0x0.st 标为「实验性·默认关闭」，并在「测试」里直接说明原因、建议改用 **imgdb.io**（图片）或 **Pixeldrain / S3**（视频）。保留适配器只是给「有代理或自建转发」的用户留入口。
+**限制**：单文件约 97MB；免费账号上传 >4MP 的图会被转成 WebP 并压到长边 2048px；动图会转 MP4；长期无人访问的免费图会被回收。
 
-### 其余说明（仅供参考）
-
-- 无需注册；接口 `POST https://0x0.st`，表单字段 `file`，可选 `expires`（小时）。
-- 单文件 ≤512MB，保留期约 30–365 天。
-- 保留期随文件体积约 30–365 天，过期后由站点清理。
-- 站点要求客户端使用可识别的 User-Agent；本扩展使用 `MediaVault/<版本号>`，不会伪装成浏览器；UA 不被识别时可能被拒绝。浏览器对脚本设置的 User-Agent 头并不保证放行，若被站点拒绝属站点策略，本扩展不通过改写浏览器 UA 来绕过。
-- 上传内容公开可访问，站点可依政策删除违规文件；具体规则以站点当前公告为准。
-
-### 常见报错
-
-| 状态码 / 现象 | 可能原因 | 处置建议 |
-| --- | --- | --- |
-| `403` | UA 不可识别，或 IP / 账号被站点封禁 | 先确认不是文件超限；若返回文本提示 User-Agent 不被允许，说明浏览器未放行自定义 UA，直接改用 Catbox 或 Pixeldrain（两者不校验 UA） |
-| `413` | 文件超过 512MB 上限 | 压缩 / 拆分，或换 Pixeldrain |
-| `429` | 触发限流 | 稍后重试 |
-| 返回纯文本但内容不是 URL | 维护页、拦截页或站点错误说明 | 按返回文本判断；稍后重试 |
+**配置项**：`IMGPILE_KEY`（必填）；`test()` 会真传一张 1px PNG，所以「测试连接」成功即代表 Key 可用。
 
 ---
 
-## ImgBB 免费图床
+## YourImageShare（可调参的 key 型接口）
+
+<a id="yourimageshare"></a>
+
+站点 API 文档要求登录后才能看（未登录访问 `/api` 返回 401、`/api/upload` 与 `/developers` 返回 403），因此这个适配器做成「参数全部可改」，拿到真实端点后不用改代码：
+
+| 配置项 | 默认值 |
+| --- | --- |
+| endpoint | `https://yourimageshare.com/api/upload` |
+| apiKey | 你在站点账号里拿到的 Key |
+| authHeader | `X-API-Key`（也可改成 `Authorization`，值会自动加 `Bearer ` 前缀） |
+
+上传为 `multipart/form-data`（字段 `file`，同时附带 `key` / `api_key` 以兼容不同实现），响应里递归查找第一个形如直链的 URL。返回 401/403 时先核对端点与鉴权头；返回 HTML 说明端点不是上传接口。
+
+**限制**：单文件约 200MB，支持 MP4/MKV/MOV/WEBM 等。
+
+---
+
+## Hippo Video（网页上传入口）
+
+<a id="hippo"></a>
+
+`developer.hippovideo.io` 是企业级 SDK：需要在后台建应用、拿 client_id/secret 走 OAuth，个人账号无法直接拿到直传密钥。因此卡片只保留「打开站点」按钮，把文件拖进网页完成上传，再把得到的链接贴回图库备注。免费版约 50 条/月。
+
+---## ImgBB 免费图床
 
 <a id="imgbb"></a>
 
@@ -452,7 +461,7 @@
 | CORS 报错 | 服务端限制来源 | 扩展通常可绕过；仍失败则给桶/服务加 `chrome-extension://<ID>` 白名单 |
 | Catbox 返回纯文本但非 URL | 站点维护页 / 拦截页，或来源被拦 | 稍后重试；核对上传域名；内容违规时换站点 |
 | Pixeldrain 上传 `400` | 文件名非法，或空间 / 策略拒绝 | 改文件名（去掉特殊字符）；核对账号空间与政策；仍失败换站点 |
-| 0x0.st 返回 `418` / `500` | 站点拒绝浏览器 UA（418）或拒绝脚本 UA（500），扩展无法改 UA | 扩展内不可用；改用 imgdb.io（图片）/ Pixeldrain（视频） |
+| ImgPile 返回 `401` | Bearer Key 无效或已被撤销 | 到 imgpile.com/developers 重新复制 Key（注意不要带空格） |
 | imgdb.io 返回 `413` | 单图超过 16MB | 压到 16MB 以内，或改用 S3 |
 | Unlockify 等待转存超时 | 站点转存队列拥堵 | 稍后重试；大文件换 S3 / Pixeldrain |
 | Cloudinary `400`（preset 相关） | 预设不是 Unsigned，或名称写错 | 后台把 Signing Mode 改为 Unsigned，重新核对 preset 名 |
@@ -472,4 +481,5 @@
 - **长期归档 / 要可控权限**：S3（R2）或 WebDAV。
 - **想接百度/阿里/夸克网盘**：Alist + WebDAV。
 - **已有图床/自建服务**：通用 HTTP 图床，填三个字段就能用。
-- **0x0.st**：扩展内不可用（站点拒绝浏览器 UA），别再纠结它。
+- **想给图要直链、还能忍压缩**：ImgPile（Key 型，超 4MP 自动转 WebP）。
+

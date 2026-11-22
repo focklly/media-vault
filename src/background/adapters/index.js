@@ -14,11 +14,12 @@ import webdav from './webdav.js';
 import httpAdapter from './http.js';
 import imgdb from './imgdb.js';
 import unlockify from './unlockify.js';
+import imgpile from './imgpile.js';
+import yourimageshare from './yourimageshare.js';
 import cloudinary from './cloudinary.js';
 import wistia from './wistia.js';
 import catbox from './catbox.js';
 import pixeldrain from './pixeldrain.js';
-import zeroxzero from './zeroxzero.js';
 import imgbb from './imgbb.js';
 import imgur from './imgur.js';
 import { webOnlyAdapters } from './webonly.js';
@@ -27,6 +28,8 @@ export const ADAPTERS = [
   // 免注册、可直接直传的优先排在前面
   imgdb,
   unlockify,
+  imgpile,
+  yourimageshare,
   github,
   s3,
   webdav,
@@ -35,7 +38,6 @@ export const ADAPTERS = [
   wistia,
   catbox,
   pixeldrain,
-  zeroxzero,
   imgbb,
   imgur,
   ...webOnlyAdapters,

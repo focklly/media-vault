@@ -7,7 +7,7 @@
 | --- | --- |
 | 项目名 | 影图管家 MediaVault |
 | 仓库 | <https://github.com/focklly/media-vault> |
-| 当前版本 | v1.2.0 |
+| 当前版本 | v1.2.1 |
 | 交接日期 | 2026-11-22 |
 | 技术栈 | Manifest V3 + 原生 JS（无构建、无框架、无后端） |
 | 目标浏览器 | Chrome / Edge 116+ |
@@ -20,7 +20,7 @@
 | 交付物 | 位置 | 说明 |
 | --- | --- | --- |
 | 扩展源码 | 仓库根目录 | 可直接「加载已解压的扩展程序」 |
-| 可分发包 | `dist/media-vault-1.2.0.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
+| 可分发包 | `dist/media-vault-1.2.1.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
 | 图标 | `src/icons/icon-{16,32,48,128}.png` | 由 `tools/make-icons.mjs` 纯 Node 生成，可复现 |
 | 测试页 | `tools/testbed.html` | 覆盖 img/srcset/懒加载/背景图/video/直链/meta 六类场景 |
 | 工程脚本 | `tools/check.ps1`、`tools/pack.ps1` | 语法+manifest 校验、打包 |
@@ -41,7 +41,7 @@
 | 图库页面（筛选/搜索/排序/预览/收藏/批量） | ✅ 完成 | 批量上传/删除/导出 |
 | 弹窗（本页统计 + 快捷开关） | ✅ 完成 | 读 content 统计 + 本地库 |
 | 设置页（元数据驱动表单） | ✅ 完成 | 自动保存、连接测试 |
-| 适配器 ×16 | ✅ 完成 | 直传 13：imgdb.io / Unlockify / GitHub / S3(SigV4) / WebDAV / HTTP / Cloudinary / Wistia / Catbox / Pixeldrain / 0x0.st(实验性) / ImgBB / Imgur；网页上传 3：ImgPile / YourImageShare / Hippo |
+| 适配器 ×15 | ✅ 完成 | 直传 14：imgdb.io / Unlockify / ImgPile / YourImageShare / GitHub / S3(SigV4) / WebDAV / HTTP / Cloudinary / Wistia / Catbox / Pixeldrain / ImgBB / Imgur；网页上传 1：Hippo（企业 OAuth） |
 | 存储路由（按类型默认站点） | ✅ 完成 | `src/shared/routing.js`：byKind → 全局兜底 → 第一个支持该类型的已启用站点 |
 | 跨站转存与历史保留 | ✅ 完成 | `transfer` 端口任务（单条/批量）；旧 remote 进 `history[]`，失败不破坏原记录 |
 | 标签（录入 / chips / 快捷筛选 / 搜索） | ✅ 完成 | 多选交集筛选；旧数据 `tags || []` 兜底；未建 DB 索引 |
@@ -76,7 +76,7 @@
 | 13 | 图库选中图片 → 上传 | 进度出现，完成后卡片显示「已上传」，复制链接可访问 |
 | 14 | 设置 → 拾取规则改最小边长 | 刷新页面后悬停阈值生效 |
 | 15 | 设置 → 数据 → 导出清单 | 下载 JSON，条目数与图库一致 |
-| 16 | 设置 → 上传目标 | Catbox / Pixeldrain / 0x0.st / ImgBB / Imgur 五张卡片自动渲染；启用后出现在全局/图片/视频下拉，仅图片站点在视频下拉中禁用并注明原因 |
+| 16 | 设置 → 上传目标 | 15 张紧凑卡片（14 直传 + 1 网页入口）自动渲染；启用后出现在全局/图片/视频下拉，仅图片站点在视频下拉中禁用并注明原因 |
 | 17 | 图库详情 → 已上传条目 | 按钮为「转存到该站点」；选择另一站点转存成功后，信息栏出现「转存历史」；转存失败时原链接保持不变 |
 | 18 | 详情面板输入标签（逗号分隔）回车 | 卡片显示标签 chips（超过 3 个折叠为 +n）；点 chip 进入标签筛选；快捷筛选行可多选、可一键清除，搜索框同样匹配标签 |
 
@@ -96,10 +96,10 @@
 8. **无云同步**：IndexedDB 属于单个浏览器 profile，多设备不互通。
 9. **权限较宽**：`http/https` 全站，商店审核需写清用途；上架前可考虑改为 `activeTab` + 可选站点权限，但会牺牲「打开页面即扫描」体验。
 10. **无 i18n**：目前仅简体中文。
-11. **免费站点限速 / 清档**：Catbox 匿名文件不归属账号，无法在后台管理；Pixeldrain 按活跃度保留约两个月；0x0.st 保留期随体积约 30–365 天。重要素材请用 S3 / WebDAV 长期归档，不要只依赖免费图床。
+11. **免费站点限速 / 清档**：Catbox 匿名文件不归属账号，无法在后台管理；Pixeldrain 按活跃度保留约两个月；ImgPile 免费图长期无人访问会被回收。重要素材请用 S3 / WebDAV 长期归档，不要只依赖免费图床。
 12. **ImgBB API 门槛**：API Key 需在账号内申请，部分接口能力可能需要 Pro；Key 缺失或账号未开通 API 时返回 400/403，报错文案已提示这一点。
-13. **0x0.st UA 要求 / Imgur 地区限制**：0x0.st 会校验 User-Agent，扩展固定发送 `MediaVault/<version>`，禁止伪装浏览器，UA 不可识别会被拒；Imgur 视频上传受账号与地区限制，失败时建议换 Catbox / Pixeldrain。
-14. **UA 无法强制覆盖**：0x0.st 依赖可识别 UA，但扩展无法强制覆盖浏览器 UA（部分 Chrome 版本会静默忽略脚本设置的 `User-Agent` 头）；若被拒属站点策略，换 Catbox / Pixeldrain 即可。未做 UA 改写的 `declarativeNetRequest` 方案（不引入该权限与规则表）。
+13. **Imgur 地区限制 / YourImageShare 端点未知**：Imgur 视频上传受账号与地区限制，失败时建议换 Catbox / Pixeldrain；YourImageShare 的公开文档需登录，端点与鉴权头可在设置里随时改。
+14. **B 站视频清晰度受账号影响**：匿名调用 playurl 一般拿到 720P 单段 mp4；更高清晰度需要登录态，分段视频不合并、降级为链接记录。
 
 ---
 
@@ -203,5 +203,8 @@
 | --- | --- | --- |
 | 2026-11-22 | v1.0.0 | 首个可交付版本：扫描/悬停/悬浮球/本地图库/四个适配器/完整文档 |
 | 2026-11-22 | v1.1.0 | 新增 5 个免费适配器（Catbox/Pixeldrain/0x0.st/ImgBB/Imgur）；按媒体类型路由默认站点；跨站转存并保留历史；标签录入/chips/多选快捷筛选/搜索匹配；图库缩略图站点角标 |
+| 2026-11-22 | v1.2.1 | 删除 0x0.st；ImgPile 按开发者 API 真直传、YourImageShare 改可调参 key 接口；B 站视频走 playurl 真下载 mp4；个人空间改右侧可拖宽抽屉；修复清单面板盖住悬浮球菜单的叠层问题 |
 | 2026-11-23 | v1.2.0 | 新增 imgdb.io（默认启用，实机验证 201/直链）与 Unlockify 视频直链（默认启用，实机 20s 转存）；新增 Cloudinary / Wistia 直传；ImgPile / YourImageShare / Hippo 登记为网页上传入口；0x0.st 降级为实验性默认关闭（站点拒绝浏览器 UA）；设置页改紧凑卡片 + 页内滚动 |
+
+
 

@@ -3,6 +3,26 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 `主版本.次版本.修订号`。
 **每次改完功能请同步更新本文件并在 GitHub 推送。**
 
+## [1.2.1] - 2026-11-22
+
+### 新增
+
+- **B 站视频真下载**：B 站用 MSE 播放，页面里只有 `blob:` 地址，旧版只能存链接。现在识别到 B 站视频后，后台调 `x/web-interface/view` 取 cid、`x/player/playurl`（qn=80、fnval=0、platform=html5）取单段 mp4 直链，带 `Referer: bilibili.com` 下载后照常入库。实机验证 `BV1K8sU65ELE` 存下 4.2MB `video/mp4`（`itm_mwre…`，status `ready`）；分段视频仍降级为链接记录。
+- **ImgPile 直传**：按官方开发者文档实现 `POST https://imgpile.com/uploads` + `Authorization: Bearer <key>` + 原始字节 body（`?filename=` 指定文件名），取 `data.urls.original`；遵循免费账号 97MB / 超 4MP 转 WebP 的站点规则。
+- **YourImageShare 可调参接口**：端点、Key、鉴权头三个字段全部可在设置里改，便于站点文档开放后直接接上。
+- **个人空间右侧抽屉**：球菜单「打开个人空间」不再跳新标签，改为右侧滑入抽屉（默认 420px，可拖拽调宽 300–1200px，宽度存 `mv.libraryWidth`，Esc / 点外部收起）。
+- 仅链接记录的流媒体条目，在能解析出真文件时会自动替换升级（不必手动删旧记录）。
+
+### 修复
+
+- **浮层叠层**：先开「媒体清单」、再点悬浮球时，旧清单不再盖住新菜单——打开菜单前先收起清单；点空白处依次收起菜单/清单/抽屉。
+- **B 站存入失败**：不再直接报错退出，失败路径也会留下链接记录与封面并给出明确提示。
+- 视频入库文件名改用页面标题（不再出现 `video-xxx.bin`）。
+
+### 移除
+
+- **0x0.st 适配器彻底删除**（文件、注册表、默认配置、文档全部移除）。实测浏览器 UA 418、脚本 UA 500，扩展内无法使用。
+
 ## [1.2.0] - 2026-11-23
 
 ### 新增

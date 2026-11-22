@@ -238,7 +238,18 @@ async function importBatch(payload, settings, progress) {
     try {
       if (!raw.url || !/^https?:|^data:|^blob:/.test(raw.url)) throw new Error('链接不可用');
       if (seen.has(raw.url)) {
-        duplicates += 1;
+        // 之前只存了「链接记录」的流媒体，现在能解析出真文件时，用新记录替换旧记录
+        const dup = existing.find((it) => it.sourceUrl === raw.url);
+        const canUpgrade = dup && dup.status === 'link-only' && dup.kind === KIND.VIDEO
+          && (raw.bilibiliResolve || raw.dataUrl);
+        if (canUpgrade) {
+          existing.splice(existing.indexOf(dup), 1);
+          await deleteItems([dup.id]);
+          const importedOne = await importMedia(raw, settings);
+          imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
+        } else {
+          duplicates += 1;
+        }
       } else {
         seen.add(raw.url);
         const importedOne = await importMedia(raw, settings);
@@ -296,6 +307,30 @@ async function importMedia(raw, settings) {
   if (raw.dataUrl) {
     blob = dataUrlToBlob(raw.dataUrl);
     item.mime = blob.type || raw.mime || '';
+  } else if (raw.bilibiliResolve) {
+    // B 站等 MSE 站点：页面里只有 blob:，改走 playurl 拿真正的 mp4 直链
+    const resolved = await resolveBilibiliVideo(pageUrl);
+    if (!resolved) {
+      item.status = 'link-only';
+      item.note = '流媒体（MSE）站点：无法解析到可下载的视频地址，已保存播放页链接';
+      await putItem(item);
+      return { item, linkOnly: true };
+    }
+    const fetched = await fetchMedia(resolved.url, resolved.referer);
+    if (!fetched.ok) {
+      item.status = 'link-only';
+      item.note = `已解析到视频地址但下载失败：${fetched.reason}`;
+      await putItem(item);
+      return { item, linkOnly: true };
+    }
+    blob = fetched.blob;
+    item.mime = fetched.mime;
+    item.size = blob.size;
+    item.fileName = `${(raw.alt || raw.pageTitle || 'bilibili').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'bilibili'}.mp4`;
+    const maxBytes = maxImportBytes(settings);
+    if (blob.size > maxBytes) {
+      throw new Error(`视频 ${formatBytes(blob.size)} 超过单文件上限 ${formatBytes(maxBytes)}`);
+    }
   } else if (raw.stream) {
     // m3u8 / mpd 分片流，扩展无法整体下载，保存为“流媒体记录”
     item.status = 'link-only';
@@ -377,6 +412,36 @@ function ensureExt(name, mime, url) {
  * 先按正常请求（带 Cookie，模拟来自原页面），失败再尝试不带 Referer，
  * 再失败则抛出可读原因，由上层降级为仅链接记录。
  */
+/* B 站：页面用 MSE 播放，但官方 playurl 接口能给出可下载的 mp4 直链（无登录一般 720P） */
+async function resolveBilibiliVideo(pageUrl) {
+  try {
+    const u = new URL(pageUrl);
+    const m = u.pathname.match(/\/video\/(BV[0-9A-Za-z]+)/i);
+    if (!m) return null;
+    const bvid = m[1];
+    const pIndex = Math.max(1, parseInt(u.searchParams.get('p') || '1', 10) || 1);
+    const headers = { Accept: 'application/json' };
+    const view = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+      credentials: 'include', referrer: pageUrl, headers,
+    }).then((r) => r.json());
+    if (!view || view.code !== 0) return null;
+    const pages = view.data.pages || [];
+    const cid = (pages[pIndex - 1] || {}).cid || view.data.cid;
+    if (!cid) return null;
+    const q = `bvid=${bvid}&cid=${cid}&qn=80&fnval=0&fnver=0&fourk=1&platform=html5&high_quality=1`;
+    const play = await fetch(`https://api.bilibili.com/x/player/playurl?${q}`, {
+      credentials: 'include', referrer: pageUrl, headers,
+    }).then((r) => r.json());
+    if (!play || play.code !== 0 || !play.data) return null;
+    const durl = play.data.durl || [];
+    if (durl.length !== 1) return null; // 分段视频不合并，避免损坏文件
+    if (!durl[0] || !durl[0].url) return null;
+    return { url: durl[0].url, referer: 'https://www.bilibili.com/' };
+  } catch (err) {
+    return null;
+  }
+}
+
 async function fetchMedia(url, pageUrl) {
   if (url.startsWith('data:')) {
     const blob = dataUrlToBlob(url);

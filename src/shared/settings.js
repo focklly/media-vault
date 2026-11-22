@@ -118,9 +118,15 @@ export const DEFAULT_SETTINGS = {
       enabled: false,
       apiKey: '',
     },
-    zeroxzero: {
+    imgpile: {
       enabled: false,
-      expires: 0,
+      apiKey: '',
+    },
+    yourimageshare: {
+      enabled: false,
+      endpoint: 'https://yourimageshare.com/api/upload',
+      apiKey: '',
+      authHeader: 'X-API-Key',
     },
     imgbb: {
       enabled: false,
@@ -142,8 +148,6 @@ export const DEFAULT_SETTINGS = {
       projectId: '',
     },
     /** 网页上传型：登记目标，扩展不代传 */
-    imgpile: { enabled: false },
-    yourimageshare: { enabled: false },
     hippovideo: { enabled: false },
   },
 };

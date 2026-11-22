@@ -40,6 +40,7 @@
   const PORT_NAME = 'mv-task';
   const PORT_MSG = { REQUEST: 'request', PROGRESS: 'progress', DONE: 'done', ERROR: 'error' };
   const STORAGE_SETTINGS_KEY = 'mv.settings';
+  const STORAGE_LIB_WIDTH = 'mv.libraryWidth';
   const MAX_BLOB_BYTES = 64 * 1024 * 1024;
   const MAX_INLINE_DATAURL = 8 * 1024 * 1024;
   const Z = 2147483647;
@@ -65,6 +66,7 @@
     els: {},
     busy: false,
     lastScanAt: 0,
+    libraryWidth: 420,
   };
 
   function mergeSettings(raw) {
@@ -265,7 +267,27 @@
 .mv-btn.mv-primary { border-color: transparent; background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; }
 .mv-panel-empty { padding: 30px 14px; text-align: center; color: #8b9cbf; font-size: 12px; line-height: 1.7; }
 .mv-panel-note { padding: 0 14px 10px; color: #7f90b3; font-size: 11px; }
-@media (prefers-reduced-motion: reduce) { .mv-ball, .mv-pill, .mv-menu, .mv-panel { animation: none; transition: none; } }
+
+/* 个人空间：右侧抽屉，宽度可拖动调整 */
+.mv-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 420px; min-width: 300px; max-width: 96vw;
+  pointer-events: auto; display: none; flex-direction: column;
+  background: rgba(9,14,26,.97); backdrop-filter: blur(18px) saturate(150%);
+  border-left: 1px solid rgba(120,140,200,.3); box-shadow: -22px 0 60px rgba(3,7,18,.55);
+  transform: translateX(102%); transition: transform .22s ease-out; }
+.mv-drawer.mv-open { display: flex; transform: none; }
+.mv-drawer-frame { flex: 1; width: 100%; border: 0; background: #0b1120; }
+.mv-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid rgba(120,140,200,.18); }
+.mv-drawer-head b { font-size: 13px; color: #e8efff; font-weight: 600; }
+.mv-drawer-head span { color: #8ea0c4; font-size: 11px; }
+.mv-drawer-head .mv-icon-btn { margin-left: auto; }
+.mv-drawer-grip { position: absolute; left: -5px; top: 0; width: 10px; height: 100%; cursor: col-resize;
+  touch-action: none; z-index: 2; }
+.mv-drawer-grip::after { content: ""; position: absolute; left: 4px; top: 0; width: 2px; height: 100%;
+  background: rgba(120,140,200,.32); transition: background .15s; }
+.mv-drawer-grip:hover::after, .mv-drawer-grip.mv-dragging::after { background: rgba(139,146,255,.9); }
+
+@media (prefers-reduced-motion: reduce) { .mv-ball, .mv-pill, .mv-menu, .mv-panel, .mv-drawer { animation: none; transition: none; } }
 `;
 
   const ICONS = {
@@ -318,13 +340,26 @@
     panel.style.display = 'none';
     layer.appendChild(panel);
 
+    // 个人空间抽屉（右侧，宽度可拖）
+    const drawer = document.createElement('div');
+    drawer.className = 'mv-drawer';
+    drawer.innerHTML = `
+      <div class="mv-drawer-grip" data-grip title="拖动调整宽度"></div>
+      <div class="mv-drawer-head">
+        <b>个人空间</b><span>图片 / 视频库</span>
+        <button class="mv-icon-btn" data-act="close" title="收起（Esc）">×</button>
+      </div>
+      <iframe class="mv-drawer-frame" title="影图管家个人空间" referrerpolicy="no-referrer"></iframe>
+    `;
+    layer.appendChild(drawer);
+
     // 提示
     const toast = document.createElement('div');
     toast.className = 'mv-toast';
     layer.appendChild(toast);
 
     state.shadow = shadow;
-    state.els = { host, layer, ball, pill, menu, panel, toast };
+    state.els = { host, layer, ball, pill, menu, panel, toast, drawer };
     applyBallPosition();
   }
 
@@ -769,12 +804,14 @@
       }
     });
 
-    // 菜单点击外部关闭
+    // 点击外部：菜单 / 清单面板 / 个人空间抽屉 依次收起
     document.addEventListener('pointerdown', (e) => {
-      if (!menu.classList.contains('mv-open')) return;
       const path = e.composedPath ? e.composedPath() : [];
-      if (path.includes(menu) || path.includes(ball)) return;
-      closeMenu();
+      const inside = (el) => el && path.includes(el);
+      if (menu.classList.contains('mv-open') && !inside(menu) && !inside(ball)) closeMenu();
+      const { panel, drawer } = state.els;
+      if (panel.style.display !== 'none' && !inside(panel) && !inside(ball)) hidePanel();
+      if (isLibraryOpen() && !inside(drawer)) closeLibraryDrawer();
     }, true);
 
     window.addEventListener('keydown', (e) => {
@@ -782,6 +819,7 @@
         closeMenu();
         hidePanel();
         hidePill();
+        closeLibraryDrawer();
       }
     }, true);
   }
@@ -833,7 +871,8 @@
       } else if (act === 'panel') {
         openPanel();
       } else if (act === 'library') {
-        send(MSG.OPEN_LIBRARY);
+        if (isLibraryOpen()) closeLibraryDrawer();
+        else openLibraryDrawer();
       } else if (act === 'settings') {
         send(MSG.OPEN_SETTINGS);
       } else if (act === 'hide') {
@@ -848,6 +887,8 @@
       closeMenu();
       return;
     }
+    // 打开菜单前先收起清单面板，避免两个浮层叠在一起挡住新菜单
+    hidePanel();
     buildMenu();
     const { ball } = state.els;
     const r = ball.getBoundingClientRect();
@@ -913,6 +954,78 @@
 
   function hidePanel() {
     state.els.panel.style.display = 'none';
+  }
+
+  /* ------------------------------ 个人空间抽屉 ------------------------------ */
+
+  function applyDrawerWidth(width) {
+    const w = Number(width) || 420;
+    const max = Math.min(window.innerWidth * 0.96, 1200);
+    state.els.drawer.style.width = `${Math.max(300, Math.min(w, max))}px`;
+  }
+
+  function openLibraryDrawer() {
+    const { drawer } = state.els;
+    const frame = drawer.querySelector('.mv-drawer-frame');
+    applyDrawerWidth(state.libraryWidth);
+    // 每次打开都刷新 iframe，保证刚存入的条目立刻可见
+    frame.src = `${chrome.runtime.getURL('src/library/library.html')}?embed=1&t=${Date.now()}`;
+    drawer.classList.add('mv-open');
+    closeMenu();
+    hidePanel();
+    hidePill();
+  }
+
+  function closeLibraryDrawer() {
+    const { drawer } = state.els;
+    drawer.classList.remove('mv-open');
+  }
+
+  function isLibraryOpen() {
+    return state.els.drawer.classList.contains('mv-open');
+  }
+
+  function loadLibraryWidth() {
+    try {
+      chrome.storage.local.get(STORAGE_LIB_WIDTH, (res) => {
+        const w = Number(res && res[STORAGE_LIB_WIDTH]);
+        if (Number.isFinite(w) && w >= 300) {
+          state.libraryWidth = w;
+          if (isLibraryOpen()) applyDrawerWidth(w);
+        }
+      });
+    } catch (_) { /* 忽略 */ }
+  }
+
+  function bindDrawer() {
+    const { drawer } = state.els;
+    drawer.querySelector('[data-act="close"]').addEventListener('click', closeLibraryDrawer);
+
+    const grip = drawer.querySelector('[data-grip]');
+    let dragging = false;
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      grip.classList.add('mv-dragging');
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      applyDrawerWidth(window.innerWidth - e.clientX);
+    });
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      grip.classList.remove('mv-dragging');
+      try { grip.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      const width = parseInt(drawer.style.width, 10) || 420;
+      state.libraryWidth = width;
+      try { chrome.storage.local.set({ [STORAGE_LIB_WIDTH]: width }); } catch (_) { /* 忽略 */ }
+    };
+    grip.addEventListener('pointerup', endDrag);
+    grip.addEventListener('pointercancel', endDrag);
   }
 
   function renderPanel() {
@@ -1017,6 +1130,10 @@
     };
   }
 
+  function isBilibiliPage() {
+    return /(^|\.)bilibili\.com$/i.test(location.hostname);
+  }
+
   /**
    * 抓取 blob: URL（页面内 MediaSource / createObjectURL 的视频）
    * 这类地址离开页面就失效，必须在页面上下文里转成 dataUrl 再交给后台。
@@ -1037,8 +1154,25 @@
     try {
       const payload = buildPayload(media);
       if (media.blobUrl) {
-        payload.dataUrl = await materializeBlobUrl(media);
-        payload.blobTransfer = true;
+        try {
+          payload.dataUrl = await materializeBlobUrl(media);
+          payload.blobTransfer = true;
+        } catch (err) {
+          // MediaSource（MSE）播放的 blob: 没有可读字节（B 站、YouTube 等都这样），
+          // 视频退化成「仅链接记录」，把页面地址和封面存进来，而不是直接失败
+          if (media.kind === KIND.VIDEO) {
+            payload.url = location.href;
+            if (isBilibiliPage()) {
+              // B 站：让后台用 playurl 接口解析出真正的 mp4 直链并下载
+              payload.bilibiliResolve = true;
+            } else {
+              payload.stream = true;
+              payload.linkOnly = true;
+            }
+          } else {
+            throw err;
+          }
+        }
       }
       if (opts.forceUpload) payload.forceUpload = true;
       const result = await runTask(TASK.IMPORT, {
@@ -1047,6 +1181,11 @@
       });
       const item = result.imported && result.imported[0];
       if (item) {
+        if (item.status === 'link-only' && item.kind === KIND.VIDEO) {
+          toast(item.note || '该站点用流媒体播放（MSE），无法下载视频本体：已保存页面链接与封面', false, 3600);
+          bumpBallCount(1);
+          return;
+        }
         if (item.remote && item.remote.url) {
           const label = item.targetLabel ? ` · ${item.targetLabel}` : '';
           toast(`已存入并上传${label} · ${item.title}`);
@@ -1071,7 +1210,13 @@
     if (!state.inventory.length) {
       await scanPage({ silent: true });
     }
-    const items = state.inventory.map((i) => buildPayload(i));
+    const bili = isBilibiliPage();
+    const items = state.inventory.map((i) => {
+      if (!(i.blobUrl && i.kind === KIND.VIDEO)) return buildPayload(i);
+      return buildPayload(i, bili
+        ? { url: location.href, bilibiliResolve: true }
+        : { url: location.href, stream: true, linkOnly: true });
+    });
     if (!items.length) {
       toast('没有可存入的媒体');
       return;
@@ -1150,6 +1295,8 @@
     buildShell();
     bindHover();
     bindBall();
+    bindDrawer();
+    loadLibraryWidth();
     buildMenu();
     bindMenu();
     applySettings();
