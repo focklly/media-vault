@@ -63,8 +63,20 @@ async function init() {
   state.adapters = meta.adapters || [];
 
   bindUI();
+  // 抽屉复用同一个 iframe，再次打开时由这里静默刷新，避免整页重载闪烁
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'MV_REFRESH_LIBRARY') {
+      state.items = [];
+      refresh().catch(() => {});
+    }
+  });
   await refresh();
-  renderStorage();
+  // 同一个视频页可能被扫/存过多次，打开图库时自动合并，只留最完整的一条
+  const deduped = await sendMessage('MV_DEDUPE_LIBRARY');
+  if (deduped && deduped.removed) {
+    toast(`已合并 ${deduped.removed} 条重复视频`);
+    await refresh();
+  }
 }
 
 function bindUI() {
@@ -574,6 +586,8 @@ async function openModal(id) {
     ['时长', item.kind === KIND.VIDEO && item.duration ? formatDuration(item.duration) : '—'],
     ['音轨', item.kind === KIND.VIDEO ? (item.audioMissing ? '缺失（点「重新抓取带音轨版本」修）' : '正常') : '—'],
     ['来源站点', item.site || '—'],
+    ['作者', item.author?.name || '—', item.author?.url],
+    ['字幕', item.subtitle ? `${item.subtitle.langLabel || item.subtitle.lang} · ${item.subtitle.count} 条` : '无'],
     ['入库时间', formatDate(item.createdAt)],
     ['上传状态', item.remote?.url ? `已上传（${labelFor(item.remote.adapterId)}）` : (item.remote?.error ? `失败（${labelFor(item.remote.adapterId)}）` : '未上传')],
     ['本地副本', item.files?.orig
@@ -672,6 +686,10 @@ async function openModal(id) {
     closeModal();
   });
   btn('复制链接', '', () => copyLink(item));
+  if (item.subtitle?.key) {
+    btn('查看字幕', '', () => showSubtitleViewer(item));
+    btn('下载字幕', '', () => downloadSubtitle(item));
+  }
   if (item.kind === KIND.VIDEO) {
     btn('重新抓取带音轨版本', '', async () => {
       showProgress('正在重新抓取带音轨版本…', 0, 1, '抖音合轨 mp4');
@@ -842,6 +860,71 @@ async function deleteSelected() {
   } catch (err) {
     toast(`删除失败：${err.message || err}`, true);
   }
+}
+
+function srtStamp(sec) {
+  const s = Math.max(0, Number(sec) || 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = Math.floor(s % 60);
+  const ms = Math.round((s - Math.floor(s)) * 1000);
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${p2(h)}:${p2(m)}:${p2(ss)},${String(ms).padStart(3, '0')}`;
+}
+
+function toSrt(cues) {
+  return cues.map((c, i) => `${i + 1}\n${srtStamp(c.from)} --> ${srtStamp(c.to)}\n${c.text}\n`).join('\n');
+}
+
+async function subtitleCues(item) {
+  if (!item.subtitle?.key) return null;
+  const blob = await getBlob(item.subtitle.key);
+  if (!blob) return null;
+  try {
+    const data = JSON.parse(await blob.text());
+    return Array.isArray(data.cues) ? data.cues : [];
+  } catch (_) {
+    return null;
+  }
+}
+
+async function showSubtitleViewer(item) {
+  const cues = await subtitleCues(item);
+  if (!cues || !cues.length) {
+    toast('这条字幕读不出来，可能已随条目删除', true);
+    return;
+  }
+  const body = document.querySelector('.modal-body');
+  if (!body) return;
+  body.querySelectorAll('.sub-view').forEach((n) => n.remove());
+  const box = document.createElement('div');
+  box.className = 'sub-view';
+  box.innerHTML = `<div class="sub-view-head"><b>字幕 · ${item.subtitle.langLabel || item.subtitle.lang} · ${cues.length} 条</b><button class="sub-close">关闭</button></div><div class="sub-list"></div>`;
+  const list = box.querySelector('.sub-list');
+  cues.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'sub-cue';
+    const time = document.createElement('time');
+    time.textContent = `${srtStamp(c.from).slice(3, 11)} → ${srtStamp(c.to).slice(3, 11)}`;
+    const p = document.createElement('p');
+    p.textContent = c.text;
+    row.append(time, p);
+    list.appendChild(row);
+  });
+  box.querySelector('.sub-close').addEventListener('click', () => box.remove());
+  body.appendChild(box);
+}
+
+async function downloadSubtitle(item) {
+  const cues = await subtitleCues(item);
+  if (!cues || !cues.length) {
+    toast('这条字幕读不出来，可能已随条目删除', true);
+    return;
+  }
+  const srt = toSrt(cues);
+  const name = (item.fileName || 'subtitle').replace(/\.[a-z0-9]+$/i, '');
+  triggerDownload(URL.createObjectURL(new Blob([srt], { type: 'text/plain;charset=utf-8' })), `${name}.srt`, true);
+  toast('字幕已导出 .srt');
 }
 
 async function copyText(text) {

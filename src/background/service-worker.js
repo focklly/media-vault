@@ -202,8 +202,11 @@ async function handleShortMessage(msg, sender) {
     case MSG.OPEN_SETTINGS:
       chrome.runtime.openOptionsPage();
       return { ok: true };
-    case MSG.SET_VIDEO_THUMB: {
-      // 图库页用 <video> 抽出视频第一帧后回传，这里落成缩略图
+    case 'MV_DEDUPE_LIBRARY': {
+      const removed = await dedupeVideoItems();
+      return { ok: true, removed };
+    }
+    case MSG.SET_VIDEO_THUMB: {      // 图库页用 <video> 抽出视频第一帧后回传，这里落成缩略图
       const { id, dataUrl } = msg.payload || {};
       if (!id || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return { ok: false };
       const item = await getItem(id);
@@ -286,6 +289,58 @@ async function runTask(type, payload, progress) {
  * 导入流程
  * ------------------------------------------------------------------ */
 
+function normalizeAuthor(a) {
+  if (!a || typeof a !== 'object') return null;
+  const name = String(a.name || '').trim().slice(0, 60);
+  if (!name) return null;
+  return {
+    name,
+    url: /^https?:\/\//.test(a.url || '') ? a.url : '',
+    avatar: /^https?:\/\//.test(a.avatar || '') ? a.avatar : '',
+  };
+}
+
+/** 视频页身份：只对抖音/B 站这类「一页一视频」的站点生效；丢掉统计参数，只保留真正区分视频的字段 */
+function normalizePageKey(u) {
+  if (!u) return '';
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^(www|m)\./i, '');
+    if (/^(douyin|iesdouyin)\.com$/i.test(host)) {
+      const modal = url.searchParams.get('modal_id');
+      return `${host}${url.pathname}${modal ? `?modal_id=${modal}` : ''}`;
+    }
+    if (/^bilibili\.com$/i.test(host)) {
+      const p = url.searchParams.get('p');
+      return `${host}${url.pathname.replace(/\/+$/, '')}${p && p !== '1' ? `?p=${p}` : ''}`;
+    }
+    return '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/** 已存在的视频条目补齐作者/字幕（旧版本导入的条目没有这些字段） */
+async function enrichVideoItem(item, raw) {
+  const patch = {};
+  if (raw.author && !item.author) patch.author = normalizeAuthor(raw.author);
+  if (raw.bilibiliResolve && (!item.author || !item.subtitle)) {
+    const resolved = await resolveBilibiliVideo(raw.pageUrl || item.pageUrl);
+    if (resolved) {
+      if (!patch.author && resolved.author) patch.author = resolved.author;
+      if (!item.subtitle && resolved.bvid) {
+        const sub = await fetchBilibiliSubtitle(resolved.bvid, resolved.cid, raw.pageUrl || item.pageUrl);
+        if (sub) {
+          const key = `${item.id}:sub`;
+          await putBlob(key, item.id, new Blob([JSON.stringify(sub)], { type: 'application/json' }));
+          patch.subtitle = { lang: sub.lang, langLabel: sub.langLabel, count: sub.cues.length, key, source: 'platform' };
+        }
+      }
+    }
+  }
+  if (Object.keys(patch).length) await updateItem(item.id, patch);
+}
+
 async function importBatch(payload, settings, progress) {
   const raws = (payload.items || []).slice(0, LIMITS.maxBatch);
   if (!raws.length) return { imported: [], failed: [], duplicates: 0 };
@@ -301,7 +356,26 @@ async function importBatch(payload, settings, progress) {
   await mapLimit(raws, LIMITS.concurrency, async (raw) => {
     try {
       if (!raw.url || !/^https?:|^data:|^blob:/.test(raw.url)) throw new Error('链接不可用');
-      if (seen.has(raw.url)) {
+      // 同一个视频页只留一条：抖音弹层、B 站播放页的 pageUrl 就是视频身份
+      const kind = raw.kind === KIND.VIDEO ? KIND.VIDEO : KIND.IMAGE;
+      const pageKey = normalizePageKey(raw.pageUrl);
+      const sameVideo = kind === KIND.VIDEO && pageKey
+        ? existing.find((it) => it.kind === KIND.VIDEO && normalizePageKey(it.pageUrl) === pageKey)
+        : null;
+      if (sameVideo && !seen.has(raw.url)) {
+        const canUpgrade = sameVideo.status === 'link-only'
+          && (raw.douyinCandidates || raw.bilibiliResolve || raw.dataUrl);
+        if (canUpgrade) {
+          existing.splice(existing.indexOf(sameVideo), 1);
+          await deleteItems([sameVideo.id]);
+          const importedOne = await importMedia(raw, settings);
+          imported.push({ ...importedOne.item, targetLabel: importedOne.targetLabel });
+        } else {
+          // 已经有这条视频时，顺手补齐作者/字幕等元信息（不重复下载文件）
+          await enrichVideoItem(sameVideo, raw);
+          duplicates += 1;
+        }
+      } else if (seen.has(raw.url)) {
         // 之前只存了「链接记录」的流媒体，现在能解析出真文件时，用新记录替换旧记录
         const dup = existing.find((it) => it.sourceUrl === raw.url);
         const canUpgrade = dup && dup.status === 'link-only' && dup.kind === KIND.VIDEO
@@ -362,6 +436,8 @@ async function importMedia(raw, settings) {
     note: '',
     files: {},
     remote: null,
+    author: normalizeAuthor(raw.author),
+    subtitle: null,
     createdAt: nowISO(),
     updatedAt: nowISO(),
   };
@@ -391,10 +467,20 @@ async function importMedia(raw, settings) {
     item.mime = fetched.mime;
     item.size = blob.size;
     item.fileName = `${(raw.alt || raw.pageTitle || 'bilibili').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'bilibili'}.mp4`;
+    item.author = normalizeAuthor(resolved.author) || item.author;
     const maxBytes = maxImportBytes(settings);
     if (blob.size > maxBytes) {
       throw new Error(`视频 ${formatBytes(blob.size)} 超过单文件上限 ${formatBytes(maxBytes)}`);
     }
+    // 顺带抓 B 站原生字幕（有就存，没有不报错）
+    try {
+      const sub = await fetchBilibiliSubtitle(resolved.bvid, resolved.cid, pageUrl);
+      if (sub) {
+        const key = `${id}:sub`;
+        await putBlob(key, id, new Blob([JSON.stringify(sub)], { type: 'application/json' }));
+        item.subtitle = { lang: sub.lang, langLabel: sub.langLabel, count: sub.cues.length, key, source: 'platform' };
+      }
+    } catch (_) { /* 字幕失败不影响视频 */ }
   } else if (raw.douyinCandidates && raw.douyinCandidates.length) {
     // 抖音：探针抓到的是 m4s 分轨，先读轨道头部（顺带拿 vid），
     // 再用 play 接口换取音视频合轨的渐进式 mp4，避免存下来没声音。
@@ -495,6 +581,27 @@ function ensureExt(name, mime, url) {
   return `${name}.${guessed}`;
 }
 
+/** B 站字幕：player/v2 给出字幕轨地址，取第一条中文（含 AI 中文）转成统一结构 */
+async function fetchBilibiliSubtitle(bvid, cid, pageUrl) {
+  try {
+    const v2 = await fetch(`https://api.bilibili.com/x/player/v2?bvid=${bvid}&cid=${cid}`, {
+      credentials: 'include', referrer: pageUrl, headers: { Accept: 'application/json' },
+    }).then((r) => r.json());
+    if (!v2 || v2.code !== 0) return null;
+    const list = ((v2.data && v2.data.subtitle && v2.data.subtitle.subtitles) || []).filter((s) => s.subtitle_url);
+    const pick = list.find((s) => /zh|ai-zh/i.test(s.lan || '')) || list[0];
+    if (!pick) return null;
+    const url = pick.subtitle_url.startsWith('//') ? `https:${pick.subtitle_url}` : pick.subtitle_url;
+    const body = await fetch(url, { credentials: 'include' }).then((r) => r.json());
+    const cues = (body.body || []).map((c) => ({ from: Number(c.from), to: Number(c.to), text: String(c.content || '').trim() }))
+      .filter((c) => c.text);
+    if (!cues.length) return null;
+    return { lang: pick.lan || 'zh', langLabel: pick.lan_doc || '中文', cues };
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * 抓取原始媒体
  * 先按正常请求（带 Cookie，模拟来自原页面），失败再尝试不带 Referer，
@@ -516,6 +623,10 @@ async function resolveBilibiliVideo(pageUrl) {
     const pages = view.data.pages || [];
     const cid = (pages[pIndex - 1] || {}).cid || view.data.cid;
     if (!cid) return null;
+    const owner = view.data.owner || {};
+    const author = owner.mid
+      ? { name: owner.name || '', url: `https://space.bilibili.com/${owner.mid}`, avatar: owner.face || '' }
+      : null;
     const q = `bvid=${bvid}&cid=${cid}&qn=80&fnval=0&fnver=0&fourk=1&platform=html5&high_quality=1`;
     const play = await fetch(`https://api.bilibili.com/x/player/playurl?${q}`, {
       credentials: 'include', referrer: pageUrl, headers,
@@ -524,10 +635,36 @@ async function resolveBilibiliVideo(pageUrl) {
     const durl = play.data.durl || [];
     if (durl.length !== 1) return null; // 分段视频不合并，避免损坏文件
     if (!durl[0] || !durl[0].url) return null;
-    return { url: durl[0].url, referer: 'https://www.bilibili.com/' };
+    return {
+      url: durl[0].url, referer: 'https://www.bilibili.com/', author, bvid, cid,
+    };
   } catch (err) {
     return null;
   }
+}
+
+/** 合并重复视频：同一个抖音/B 站视频页只保留「最完整」的一条（有远程链接 > 有本地文件 > 有音轨 > 体积大） */
+async function dedupeVideoItems() {
+  const items = await getAllItems();
+  const groups = new Map();
+  for (const it of items) {
+    if (it.kind !== KIND.VIDEO) continue;
+    const key = normalizePageKey(it.pageUrl) || `src:${it.sourceUrl || it.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  const toDelete = [];
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const score = (it) => (it.remote?.url ? 1e12 : 0)
+      + (it.files?.orig ? 1e9 : 0)
+      + (it.audioMissing ? 0 : 1e6)
+      + (it.size || 0);
+    list.sort((a, b) => score(b) - score(a));
+    list.slice(1).forEach((it) => toDelete.push(it.id));
+  }
+  if (toDelete.length) await deleteItems(toDelete);
+  return toDelete.length;
 }
 
 /** 抖音旧条目重抓：本地副本里能读到 vid，就用 play 接口换音视频合轨版本，覆盖原文件 */

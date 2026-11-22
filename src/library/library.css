@@ -246,3 +246,17 @@ button, input, select { font: inherit; }
   0% { transform: translateX(-100%); }
   100% { transform: translateX(260%); }
 }
+
+/* 字幕查看：覆盖在弹窗内容区上，可滚动浏览 */
+.modal-body { position: relative; }
+.sub-view { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column;
+  background: rgba(7,11,22,.98); border-radius: inherit; }
+.sub-view-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border-bottom: 1px solid var(--line); font-size: 12.5px; color: #dfe8fb; }
+.sub-view-head b { font-weight: 600; }
+.sub-close { margin-left: auto; border: 1px solid var(--line); background: var(--panel-2);
+  color: #dfe8fb; border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.sub-view .sub-list { flex: 1; overflow: auto; padding: 10px 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.sub-cue { display: grid; grid-template-columns: 118px 1fr; gap: 10px; font-size: 12.5px; line-height: 1.55; }
+.sub-cue time { color: #7f90b3; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.sub-cue p { margin: 0; color: #dfe8fb; }

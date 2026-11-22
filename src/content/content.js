@@ -249,10 +249,15 @@
 .mv-icon-btn { margin-left: auto; width: 26px; height: 26px; border-radius: 7px; border: 0;
   background: transparent; color: #93a3c4; cursor: pointer; font-size: 16px; line-height: 1; }
 .mv-icon-btn:hover { background: rgba(120,140,200,.16); color: #fff; }
-.mv-panel-body { overflow: auto; padding: 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mv-panel-body { overflow: auto; padding: 8px 8px 4px; display: block; }
+.mv-group { margin-bottom: 10px; }
+.mv-group-head { display: flex; align-items: center; gap: 6px; padding: 2px 4px 7px; color: #c7d4ec;
+  font-size: 11.5px; font-weight: 600; }
+.mv-group-head em { font-style: normal; color: #7f90b3; font-weight: 500; }
+.mv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .mv-cell { position: relative; aspect-ratio: 1 / 1; border-radius: 10px; overflow: hidden;
-  background: #1b2437; border: 1px solid rgba(120,140,200,.18); cursor: pointer; }
-.mv-cell img, .mv-cell video { width: 100%; height: 100%; object-fit: cover; display: block; background: #111827; }
+  background: #0d1526; border: 1px solid rgba(120,140,200,.18); cursor: pointer; }
+.mv-cell img, .mv-cell video { width: 100%; height: 100%; object-fit: contain; display: block; background: #0d1526; }
 .mv-cell .mv-cell-tag { position: absolute; top: 5px; left: 5px; padding: 2px 6px; border-radius: 6px;
   background: rgba(8,12,24,.78); color: #cbd8f0; font-size: 10px; font-weight: 600; }
 .mv-cell .mv-cell-dim { position: absolute; bottom: 5px; left: 5px; padding: 2px 6px; border-radius: 6px;
@@ -276,7 +281,7 @@
   border-left: 1px solid rgba(120,140,200,.3); box-shadow: -22px 0 60px rgba(3,7,18,.55);
   transform: translateX(102%); transition: transform .22s ease-out; }
 .mv-drawer.mv-open { display: flex; transform: none; }
-.mv-drawer-frame { flex: 1; width: 100%; border: 0; background: #0b1120; }
+.mv-drawer-frame { flex: 1; width: 100%; border: 0; background: #0b1120; transition: opacity .18s ease-out; }
 .mv-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
   border-bottom: 1px solid rgba(120,140,200,.18); }
 .mv-drawer-head b { font-size: 13px; color: #e8efff; font-weight: 600; }
@@ -835,21 +840,12 @@
         <span>本页</span>
         <span class="mv-menu-count">图 ${counts.images} · 视 ${counts.videos}</span>
       </div>
-      <button class="mv-menu-item" data-act="scan">
-        ${ICONS.scan}<span class="mv-mi-main">重新扫描本页<span class="mv-mi-sub">收集图片 / 视频 / 背景图 / 视频直链</span></span>
-      </button>
-      <button class="mv-menu-item" data-act="all">
-        ${ICONS.download}<span class="mv-mi-main">全部存入个人空间<span class="mv-mi-sub">当前清单 ${counts.total} 个媒体</span></span>
-      </button>
       <button class="mv-menu-item" data-act="panel">
         ${ICONS.grid}<span class="mv-mi-main">查看媒体清单<span class="mv-mi-sub">可单独存入手动挑选</span></span>
       </button>
       <div class="mv-menu-sep"></div>
       <button class="mv-menu-item" data-act="library">
         ${ICONS.grid}<span class="mv-mi-main">打开个人空间</span>
-      </button>
-      <button class="mv-menu-item" data-act="settings">
-        ${ICONS.gear}<span class="mv-mi-main">设置上传目标与规则</span>
       </button>
       <button class="mv-menu-item" data-act="hide">
         ${ICONS.eyeoff}<span class="mv-mi-main">隐藏悬浮球<span class="mv-mi-sub">可在扩展图标里重新打开</span></span>
@@ -970,8 +966,16 @@
     const { drawer } = state.els;
     const frame = drawer.querySelector('.mv-drawer-frame');
     applyDrawerWidth(state.libraryWidth);
-    // 每次打开都刷新 iframe，保证刚存入的条目立刻可见
-    frame.src = `${chrome.runtime.getURL('src/library/library.html')}?embed=1&t=${Date.now()}`;
+    // 只在第一次打开时加载 iframe；之后直接复用并让页面自己刷新，
+    // 避免每次重新加载导致的白屏/闪烁
+    if (!frame.dataset.loaded) {
+      frame.dataset.loaded = '1';
+      frame.style.opacity = '0';
+      frame.addEventListener('load', () => { frame.style.opacity = '1'; }, { once: true });
+      frame.src = `${chrome.runtime.getURL('src/library/library.html')}?embed=1`;
+    } else {
+      try { frame.contentWindow.postMessage({ type: 'MV_REFRESH_LIBRARY', at: Date.now() }, '*'); } catch (_) { /* 忽略 */ }
+    }
     drawer.classList.add('mv-open');
     closeMenu();
     hidePanel();
@@ -1033,62 +1037,84 @@
   function renderPanel() {
     const { panel } = state.els;
     const counts = quickCounts();
-    const shown = state.inventory.slice(0, 60);
+    // 视频优先，按类型分组：视频 → 图片；同组内保持扫描顺序
+    const videos = state.inventory.filter((i) => i.kind === KIND.VIDEO);
+    const images = state.inventory.filter((i) => i.kind !== KIND.VIDEO);
+    const groups = [
+      { key: 'video', label: '视频', items: videos },
+      { key: 'image', label: '图片', items: images },
+    ].filter((g) => g.items.length);
     panel.innerHTML = `
       <div class="mv-panel-head">
         <b>本页媒体</b>
-        <span>图片 ${counts.images} · 视频 ${counts.videos}</span>
+        <span>视频 ${counts.videos} · 图片 ${counts.images}</span>
         <button class="mv-icon-btn" data-act="close" title="关闭">×</button>
       </div>
       <div class="mv-panel-body" data-body></div>
-      ${state.inventory.length > shown.length ? `<div class="mv-panel-note">仅展示前 ${shown.length} 个，共 ${state.inventory.length} 个；点「全部存入」可一次处理。</div>` : ''}
+      ${state.inventory.length > 60 ? `<div class="mv-panel-note">仅展示前 60 个，共 ${state.inventory.length} 个；点「全部存入」可一次处理。</div>` : ''}
       <div class="mv-panel-foot">
         <button class="mv-btn" data-act="rescan">重新扫描</button>
         <button class="mv-btn mv-primary" data-act="all">全部存入 (${counts.total})</button>
       </div>
     `;
     const body = panel.querySelector('[data-body]');
-    if (!shown.length) {
-      body.innerHTML = `<div class="mv-panel-empty" style="grid-column:1/-1">没有发现可下载的媒体<br/>试试滚动页面触发懒加载后重新扫描</div>`;
+    if (!groups.length) {
+      body.innerHTML = `<div class="mv-panel-empty">没有发现可下载的媒体<br/>试试滚动页面触发懒加载后重新扫描</div>`;
     }
-    shown.forEach((item) => {
-      const cell = document.createElement('div');
-      cell.className = 'mv-cell';
-      cell.title = item.url;
-      if (item.kind === KIND.VIDEO) {
-        const v = document.createElement('video');
-        v.src = item.url;
-        v.muted = true;
-        v.playsInline = true;
-        v.preload = 'metadata';
-        if (item.poster) v.poster = item.poster;
-        v.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
-        v.addEventListener('mouseleave', () => { v.pause(); });
-        cell.appendChild(v);
-        const tag = document.createElement('span');
-        tag.className = 'mv-cell-tag';
-        tag.textContent = item.stream ? '流媒体' : '视频';
-        cell.appendChild(tag);
-      } else {
-        const img = document.createElement('img');
-        img.src = item.url;
-        img.loading = 'lazy';
-        img.referrerPolicy = 'no-referrer';
-        img.addEventListener('error', () => { img.style.opacity = 0.15; });
-        cell.appendChild(img);
-      }
-      if (item.width && item.height) {
-        const dim = document.createElement('span');
-        dim.className = 'mv-cell-dim';
-        dim.textContent = `${item.width}×${item.height}`;
-        cell.appendChild(dim);
-      }
-      cell.addEventListener('click', async () => {
-        if (state.busy) return;
-        await saveOne(item, {});
-        cell.classList.add('mv-cell-ok');
+    let budget = 60;
+    groups.forEach((group) => {
+      if (budget <= 0) return;
+      const items = group.items.slice(0, budget);
+      budget -= items.length;
+      const section = document.createElement('section');
+      section.className = 'mv-group';
+      const head = document.createElement('div');
+      head.className = 'mv-group-head';
+      head.innerHTML = `<span>${group.label}</span><em>${group.items.length}</em>`;
+      section.appendChild(head);
+      const grid = document.createElement('div');
+      grid.className = 'mv-grid';
+      section.appendChild(grid);
+      items.forEach((item) => {
+        const cell = document.createElement('div');
+        cell.className = 'mv-cell';
+        cell.title = item.url;
+        if (item.kind === KIND.VIDEO) {
+          const v = document.createElement('video');
+          v.src = item.url;
+          v.muted = true;
+          v.playsInline = true;
+          v.preload = 'metadata';
+          if (item.poster) v.poster = item.poster;
+          v.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
+          v.addEventListener('mouseleave', () => { v.pause(); });
+          cell.appendChild(v);
+          const tag = document.createElement('span');
+          tag.className = 'mv-cell-tag';
+          tag.textContent = item.stream ? '流媒体' : '视频';
+          cell.appendChild(tag);
+        } else {
+          const img = document.createElement('img');
+          img.src = item.url;
+          img.loading = 'lazy';
+          img.referrerPolicy = 'no-referrer';
+          img.addEventListener('error', () => { img.style.opacity = 0.15; });
+          cell.appendChild(img);
+        }
+        if (item.width && item.height) {
+          const dim = document.createElement('span');
+          dim.className = 'mv-cell-dim';
+          dim.textContent = `${item.width}×${item.height}`;
+          cell.appendChild(dim);
+        }
+        cell.addEventListener('click', async () => {
+          if (state.busy) return;
+          await saveOne(item, {});
+          cell.classList.add('mv-cell-ok');
+        });
+        grid.appendChild(cell);
       });
-      body.appendChild(cell);
+      body.appendChild(section);
     });
 
     panel.querySelector('[data-act="close"]').addEventListener('click', hidePanel);
@@ -1188,6 +1214,27 @@
     return found.map((f) => f.url).slice(0, 8);
   }
 
+  /** 抖音作者：优先 data-e2e 标记，退回第一个 /user/ 链接 */
+  function douyinAuthor() {
+    try {
+      const byE2E = document.querySelector('[data-e2e="video-author"]')
+        || document.querySelector('[data-e2e="feed-video-author"]');
+      const link = document.querySelector('a[href*="/user/"]');
+      const name = ((byE2E && byE2E.textContent) || (link && link.textContent) || '')
+        .replace(/\s+/g, ' ').replace(/^@/, '').trim().slice(0, 60);
+      if (!name) return null;
+      let url = '';
+      try {
+        if (link && link.href) url = new URL(link.href, location.origin).href;
+        else if (byE2E && byE2E.closest('a')) url = new URL(byE2E.closest('a').href, location.origin).href;
+      } catch (_) { url = ''; }
+      const avatarEl = document.querySelector('.mv-hover-avatar') || document.querySelector('[data-e2e="video-author"] img');
+      return { name, url, avatar: (avatarEl && avatarEl.currentSrc) || '' };
+    } catch (_) {
+      return null;
+    }
+  }
+
   /** 探针可能比播放器慢一步（首帧缓冲、切集），点存入时再等一会儿 */
   async function douyinVideoUrlsReady(timeoutMs = 6000) {
     const end = Date.now() + timeoutMs;
@@ -1266,6 +1313,32 @@
     return blobToDataUrl(blob);
   }
 
+  /** 平台专用解析：B 站走 playurl，抖音走探针直链；返回 true 表示已拿到可下载地址 */
+  async function applyPlatformPayload(payload) {
+    if (isBilibiliPage()) {
+      payload.url = location.href;
+      payload.bilibiliResolve = true;
+      return true;
+    }
+    if (isDouyinPage()) {
+      const douyinUrl = await douyinVideoUrlsReady();
+      if (douyinUrl.length) {
+        payload.url = douyinUrl[0];
+        payload.douyinCandidates = douyinUrl;
+        payload.pageUrl = location.href;
+        payload.author = douyinAuthor();
+        payload.fileName = `${(document.title || 'douyin').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'douyin'}.mp4`;
+        return true;
+      }
+      payload.url = location.href;
+      payload.stream = true;
+      payload.linkOnly = true;
+      payload.note = '抖音：没有抓到可下载的视频直链，已保存播放页链接';
+      return false;
+    }
+    return false;
+  }
+
   async function saveOne(media, opts = {}) {
     if (!state.settings.enabled) return;
     const { pill } = state.els;
@@ -1273,34 +1346,19 @@
     pill.classList.add('mv-loading');
     try {
       const payload = buildPayload(media);
-      if (media.blobUrl) {
+      const preferResolve = media.kind === KIND.VIDEO && media.blobUrl && (isBilibiliPage() || isDouyinPage());
+      if (preferResolve) {
+        // 这些站点的 blob 只是播放器壳子，交给平台接口拿到真文件
+        await applyPlatformPayload(payload);
+      } else if (media.blobUrl) {
         try {
           payload.dataUrl = await materializeBlobUrl(media);
           payload.blobTransfer = true;
         } catch (err) {
           // MediaSource（MSE）播放的 blob: 没有可读字节（B 站、YouTube 等都这样），
           // 视频退化成「仅链接记录」，把页面地址和封面存进来，而不是直接失败
-          if (media.kind === KIND.VIDEO) {
-            const douyinUrl = isDouyinPage() ? await douyinVideoUrlsReady() : [];
-            if (isBilibiliPage()) {
-              // B 站：让后台用 playurl 接口解析出真正的 mp4 直链并下载
-              payload.url = location.href;
-              payload.bilibiliResolve = true;
-            } else if (douyinUrl.length) {
-              // 抖音：把一组候选直链交给后台，后台逐条验轨（排除纯音频 m4s）后下载
-              payload.url = douyinUrl[0];
-              payload.douyinCandidates = douyinUrl;
-              payload.pageUrl = location.href;
-              payload.fileName = `${(document.title || 'douyin').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'douyin'}.mp4`;
-            } else {
-              payload.url = location.href;
-              payload.stream = true;
-              payload.linkOnly = true;
-              payload.note = '抖音：没有抓到可下载的视频直链，已保存播放页链接';
-            }
-          } else {
-            throw err;
-          }
+          if (media.kind === KIND.VIDEO) await applyPlatformPayload(payload);
+          else throw err;
         }
       }
       if (opts.forceUpload) payload.forceUpload = true;
@@ -1354,6 +1412,7 @@
           url: douyinUrls[0],
           douyinCandidates: douyinUrls,
           pageUrl: location.href,
+          author: douyinAuthor(),
           fileName: `${(document.title || 'douyin').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'douyin'}.mp4`,
         });
       }

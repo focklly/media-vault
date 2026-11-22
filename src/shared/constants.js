@@ -7,7 +7,7 @@
 export const APP = {
   name: '影图管家',
   nameEn: 'MediaVault',
-  version: '1.2.2',
+  version: '1.2.3',
   repo: 'https://github.com/focklly/media-vault',
   docs: 'https://github.com/focklly/media-vault/tree/main/docs',
 };
@@ -99,5 +99,6 @@ export const DEFAULT_EXCLUDED_SITES = [
   'mail.google.com',
   'accounts.google.com',
 ];
+
 
 
