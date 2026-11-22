@@ -43,7 +43,10 @@
   const STORAGE_LIB_WIDTH = 'mv.libraryWidth';
   const MAX_BLOB_BYTES = 64 * 1024 * 1024;
   const MAX_INLINE_DATAURL = 8 * 1024 * 1024;
-  const STATE_VERSION = '1.2.2';
+  // 版本号从 manifest 读，避免改版本时这里忘了同步
+  const STATE_VERSION = (() => {
+    try { return chrome.runtime.getManifest().version; } catch (_) { return '1.2.5'; }
+  })();
   const Z = 2147483647;
 
   const DEFAULTS = {
@@ -285,6 +288,9 @@
   border-bottom: 1px solid rgba(120,140,200,.18); }
 .mv-drawer-head b { font-size: 13px; color: #e8efff; font-weight: 600; }
 .mv-drawer-head span { color: #8ea0c4; font-size: 11px; }
+.mv-drawer-head .mv-ver { color: #8fa3c6; font-size: 10px; line-height: 1; padding: 3px 6px;
+  border-radius: 999px; background: rgba(120,140,200,.14); border: 1px solid rgba(120,140,200,.22);
+  font-family: ui-monospace, Consolas, monospace; letter-spacing: .2px; }
 .mv-drawer-head .mv-icon-btn { margin-left: auto; }
 .mv-drawer-grip { position: absolute; left: -5px; top: 0; width: 10px; height: 100%; cursor: col-resize;
   touch-action: none; z-index: 2; }
@@ -352,7 +358,7 @@
     drawer.innerHTML = `
       <div class="mv-drawer-grip" data-grip title="拖动调整宽度"></div>
       <div class="mv-drawer-head">
-        <b>个人空间</b><span>图片 / 视频库</span>
+        <b>个人空间</b><span>图片 / 视频库</span><span class="mv-ver">v${STATE_VERSION}</span>
         <button class="mv-icon-btn" data-act="close" title="收起（Esc）">×</button>
       </div>
       <iframe class="mv-drawer-frame" title="影图管家个人空间" referrerpolicy="no-referrer"></iframe>

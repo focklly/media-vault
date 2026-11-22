@@ -3,6 +3,12 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 `主版本.次版本.修订号`。
 **每次改完功能请同步更新本文件并在 GitHub 推送。**
 
+## [1.2.5] - 2026-11-23
+
+### 变更
+
+- **个人空间抽屉标题栏显示版本号**（`v1.2.5` 小胶囊），版本号直接取 `chrome.runtime.getManifest().version`，以后改 manifest 就会跟着变，不再需要手动维护 content 里的副本。
+
 ## [1.2.4] - 2026-11-23
 
 ### 修复
