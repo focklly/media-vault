@@ -7,7 +7,7 @@
 | --- | --- |
 | 项目名 | 影图管家 MediaVault |
 | 仓库 | <https://github.com/focklly/media-vault> |
-| 当前版本 | v1.1.0 |
+| 当前版本 | v1.2.0 |
 | 交接日期 | 2026-11-22 |
 | 技术栈 | Manifest V3 + 原生 JS（无构建、无框架、无后端） |
 | 目标浏览器 | Chrome / Edge 116+ |
@@ -20,7 +20,7 @@
 | 交付物 | 位置 | 说明 |
 | --- | --- | --- |
 | 扩展源码 | 仓库根目录 | 可直接「加载已解压的扩展程序」 |
-| 可分发包 | `dist/media-vault-1.1.0.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
+| 可分发包 | `dist/media-vault-1.2.0.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
 | 图标 | `src/icons/icon-{16,32,48,128}.png` | 由 `tools/make-icons.mjs` 纯 Node 生成，可复现 |
 | 测试页 | `tools/testbed.html` | 覆盖 img/srcset/懒加载/背景图/video/直链/meta 六类场景 |
 | 工程脚本 | `tools/check.ps1`、`tools/pack.ps1` | 语法+manifest 校验、打包 |
@@ -41,7 +41,7 @@
 | 图库页面（筛选/搜索/排序/预览/收藏/批量） | ✅ 完成 | 批量上传/删除/导出 |
 | 弹窗（本页统计 + 快捷开关） | ✅ 完成 | 读 content 统计 + 本地库 |
 | 设置页（元数据驱动表单） | ✅ 完成 | 自动保存、连接测试 |
-| 适配器 ×9 | ✅ 完成 | GitHub / S3(SigV4) / WebDAV / HTTP / Catbox / Pixeldrain / 0x0.st / ImgBB / Imgur |
+| 适配器 ×16 | ✅ 完成 | 直传 13：imgdb.io / Unlockify / GitHub / S3(SigV4) / WebDAV / HTTP / Cloudinary / Wistia / Catbox / Pixeldrain / 0x0.st(实验性) / ImgBB / Imgur；网页上传 3：ImgPile / YourImageShare / Hippo |
 | 存储路由（按类型默认站点） | ✅ 完成 | `src/shared/routing.js`：byKind → 全局兜底 → 第一个支持该类型的已启用站点 |
 | 跨站转存与历史保留 | ✅ 完成 | `transfer` 端口任务（单条/批量）；旧 remote 进 `history[]`，失败不破坏原记录 |
 | 标签（录入 / chips / 快捷筛选 / 搜索） | ✅ 完成 | 多选交集筛选；旧数据 `tags || []` 兜底；未建 DB 索引 |
@@ -203,3 +203,5 @@
 | --- | --- | --- |
 | 2026-11-22 | v1.0.0 | 首个可交付版本：扫描/悬停/悬浮球/本地图库/四个适配器/完整文档 |
 | 2026-11-22 | v1.1.0 | 新增 5 个免费适配器（Catbox/Pixeldrain/0x0.st/ImgBB/Imgur）；按媒体类型路由默认站点；跨站转存并保留历史；标签录入/chips/多选快捷筛选/搜索匹配；图库缩略图站点角标 |
+| 2026-11-23 | v1.2.0 | 新增 imgdb.io（默认启用，实机验证 201/直链）与 Unlockify 视频直链（默认启用，实机 20s 转存）；新增 Cloudinary / Wistia 直传；ImgPile / YourImageShare / Hippo 登记为网页上传入口；0x0.st 降级为实验性默认关闭（站点拒绝浏览器 UA）；设置页改紧凑卡片 + 页内滚动 |
+

@@ -1,7 +1,7 @@
 # 存储适配器配置手册（Adapters）
 
-> 九个内置适配器都能在「设置 → 上传目标」里启用。全部配置只存本机，**不需要任何后端**。
-> 每个适配器都有「测试连接」按钮；失败信息会给出中文原因。
+> 十六个内置适配器都能在「设置 → 上传目标」里启用。全部配置只存本机，**不需要任何后端**。
+> 每个适配器都有「测试」按钮；失败信息会给出中文原因。v1.2 起卡片为紧凑单行，配置项在「展开」里。
 
 ---
 
@@ -11,19 +11,93 @@
 2. 「入库后自动上传」是可选项；不打开也能用，图库里可以手动/批量上传。
 3. 扩展已声明 `http/https` 全站权限，跨域请求通常不需要额外配 CORS；但部分服务端会校验来源，遇到时按各节提示处理。
 4. 单文件上限：GitHub 约 40MB，HTTP 图床按你配置的 `maxMB`（默认 10MB），S3/WebDAV 无硬限制（受服务商套餐约束）。
-5. 新增站点沿用现有 `http/https` 通配权限，无需额外申请域名权限；0x0.st 要求可识别 UA，属站点政策而非本扩展行为。
+5. 新增站点沿用现有 `http/https` 通配权限，无需额外申请域名权限。
+6. 默认开箱可用：**imgdb.io（图片）** 与 **Unlockify（视频）** 都不需要注册。
 
 | 适配器 | 最适合 | 免费额度参考 | 外链可否公开 |
 | --- | --- | --- | --- |
+| imgdb.io | 图片 | 单图 ≤16MB，免注册，可设永久/密码 | 可以 |
+| Unlockify | 视频 | 单文件 ≤1.9GB，免注册，出播放页/直链 | 可以 |
 | GitHub 仓库 | 图片、小视频 | 仓库容量受 GitHub 政策约束，无流量费 | 公开仓库可以；私有仓库不行 |
 | S3 兼容 | 视频、大文件 | Cloudflare R2 10GB 存储 + 出网免费 | 配了公开域名可以 |
 | WebDAV | 归档、接网盘 | 取决于网盘（坚果云/Alist 挂载） | 多数需登录；Alist 可配直链 |
 | HTTP 图床 | 接已有图床 | 取决于图床（SM.MS 等） | 一般可以 |
-| Catbox | 图片、视频 | 单文件 ≤200MB，永久保留 | 可以（匿名直链，文件不归账号管理） |
+| Cloudinary | 图片 + 视频 | 免费额度按账号计（每月） | 可以 |
+| Wistia | 视频 | 免费版有视频数量限制 | 播放页可公开 |
+| Catbox | 图片、视频 | 单文件 ≤200MB，永久保留 | 可以（匿名直链） |
 | Pixeldrain | 视频、大文件 | 单文件 ≤20GB，至少保留约两个月 | 可以（下载直链） |
-| 0x0.st | 临时分享 | 单文件 ≤512MB，保留期约 30–365 天 | 可以（公开直链，到期清理） |
+| 0x0.st | 临时分享（实验性） | 单文件 ≤512MB | 扩展内不可用，见该节 |
 | ImgBB | 图片 | 单图 ≤32MB | 可以 |
 | Imgur | 图片、GIF、短视频 | 单文件约 ≤200MB，视频 ≤60s | 可以 |
+| ImgPile / YourImageShare / Hippo | 手动网页上传 | 单文件 97MB / 200MB / 账号额度 | 可以 |
+
+---
+
+## imgdb.io 免费图床（默认启用）
+
+**原理**：`POST https://imgdb.io/api/v1/upload`，multipart 字段名 `file`；成功返回 201 + JSON，`url` 形如 `https://imgdb.io/i/<id>.png`。免注册，单图 ≤16MB，支持 png/jpg/gif/webp/avif/bmp。
+
+### 可配置项
+
+| 字段 | 说明 |
+| --- | --- |
+| 保留时长（ttl） | 秒；`0` = 永久（推荐），留空按站点默认 72 小时 |
+| 访问密码 | 可选；填了之后只有带密码的人能打开链接（走 `X-Upload-Password` 头） |
+| 描述 | 可选；写入站点上传记录，便于检索 |
+
+### 注意
+
+- 站点官方文档：<https://imgdb.io/docs>、<https://imgdb.io/llms.txt>（`imgdb.readme.io` 上的旧版接口不要用）。
+- 实机验证（2026-11）：上传 1px PNG 返回 `https://imgdb.io/i/ENgY4IM.png`，直链可直接打开。
+- 公开图床意味着拿到链接的人都能看；私密内容请加密码，或改用 S3 / WebDAV。
+
+## Unlockify 视频直链（默认启用）
+
+**原理**：`POST https://stream.unlockify.ink/backend/api/web-upload`（multipart，字段 `file`，只收视频）→ 返回 `job_id`；再轮询 `GET /backend/api/web-upload/<job_id>`，直到 `status=ready`，返回 `video_url`（形如 `/video/<public_id>`）。
+
+### 可配置项
+
+| 字段 | 说明 |
+| --- | --- |
+| 同时返回播放页链接 | 开启后图库里存 `https://stream.unlockify.ink/video/xxx` 网页；关闭则优先存直链 |
+
+### 注意
+
+- 单文件 ≤1.9GB；站点会把文件转存到自己的 Telegram 频道，实测 788KB 视频约 20 秒完成。
+- 浏览器端有「10 次网页上传」计数提示，属站点策略，不影响脚本调用。
+- 该站点 TLS 连接偶尔抖动，适配器内置一次重试；仍失败会提示稍后再试。
+- 上传只收视频；图片请走 imgdb.io。
+
+## Cloudinary（需注册，图 + 视频）
+
+**原理**：无签名上传预设直传，`POST https://api.cloudinary.com/v1_1/<cloud_name>/auto/upload`，字段 `file` + `upload_preset`（可选 `folder`），返回 `secure_url`。API Secret 不需要填，安全性更好。
+
+### 步骤
+
+1. 注册 Cloudinary → 控制台首页抄 **Cloud name**。
+2. Settings → Upload → Upload presets → Add upload preset；**Signing Mode = Unsigned**，记下 preset 名称。
+3. 把 Cloud name 和 preset 填进扩展；「测试」会用 1px 测试图真传一次（后台可删）。
+
+## Wistia（需注册，视频托管）
+
+**原理**：经典接口 `POST https://upload.wistia.com`，字段 `api_password` + `file`，返回 `media.hashed_id`，播放页 `https://home.wistia.com/medias/<id>`。
+
+### 步骤
+
+1. 注册 Wistia → Account → API Access → 取 **API password**（不是登录密码）。
+2. 填进扩展，可选填项目 ID；「测试」只验证密码是否被接受。
+
+## 网页上传站点（扩展不代传）
+
+| 站点 | 单文件 | 说明 |
+| --- | --- | --- |
+| ImgPile | 约 97MB | 免注册，图+视频，给直链/BBCode；免费图会转 WebP 压到长边 2048px，长期无人访问会回收 |
+| YourImageShare | ≤200MB | 免注册，格式覆盖 MP4/MKV/MOV/WEBM 等；站点有 key 型 REST API 但端点未公开 |
+| Hippo Video | 账号额度 | 企业级，免费版 50 条/月；Import/Upload API 需账号 + 应用授权 |
+
+这三张卡片只有「打开站点」按钮：点了会在新标签打开上传页，自己拖文件即可。它们不会出现在「默认上传目标」下拉里，也不会被自动上传选中。
+
+
 
 ---
 
@@ -257,25 +331,27 @@
 
 ---
 
-## 0x0.st 临时文件床
+## 0x0.st 临时文件床（实验性，默认关闭）
 
 <a id="zeroxzero"></a>
 
 **原理**：`multipart/form-data` POST 到 0x0.st，返回纯文本直链。定位是临时分享，不适合长期归档。
 
-### 申请/配置步骤
+### 先说结论：扩展内不可用
 
-- 无需注册，直接在设置页启用即可。
-- 接口：`POST https://0x0.st`，表单字段 `file`，可选 `expires`（保留期，单位小时）。
-- 配置字段：
+实测（2026-11，同一台机器）：
 
-| 字段 | 是否必填 | 说明 |
-| --- | --- | --- |
-| 保留期（expires，小时） | 可选 | 按站点规则设置期望保留时长；实际到期时间以站点策略为准 |
+| 请求 UA | 响应 |
+| --- | --- |
+| 浏览器 UA | **418**（站点按政策拒绝浏览器 UA） |
+| `MediaVault/1.2.0` 或 `curl/8.x` | **500** |
 
-### 免费额度与限制
+而浏览器**不允许**脚本设置 `User-Agent`（属于 forbidden header），所以扩展发出的请求一定是浏览器 UA → 必然被拒。因此 v1.2 把 0x0.st 标为「实验性·默认关闭」，并在「测试」里直接说明原因、建议改用 **imgdb.io**（图片）或 **Pixeldrain / S3**（视频）。保留适配器只是给「有代理或自建转发」的用户留入口。
 
-- 单文件 ≤ 512MB，支持图片与视频。
+### 其余说明（仅供参考）
+
+- 无需注册；接口 `POST https://0x0.st`，表单字段 `file`，可选 `expires`（小时）。
+- 单文件 ≤512MB，保留期约 30–365 天。
 - 保留期随文件体积约 30–365 天，过期后由站点清理。
 - 站点要求客户端使用可识别的 User-Agent；本扩展使用 `MediaVault/<版本号>`，不会伪装成浏览器；UA 不被识别时可能被拒绝。浏览器对脚本设置的 User-Agent 头并不保证放行，若被站点拒绝属站点策略，本扩展不通过改写浏览器 UA 来绕过。
 - 上传内容公开可访问，站点可依政策删除违规文件；具体规则以站点当前公告为准。
@@ -376,7 +452,10 @@
 | CORS 报错 | 服务端限制来源 | 扩展通常可绕过；仍失败则给桶/服务加 `chrome-extension://<ID>` 白名单 |
 | Catbox 返回纯文本但非 URL | 站点维护页 / 拦截页，或来源被拦 | 稍后重试；核对上传域名；内容违规时换站点 |
 | Pixeldrain 上传 `400` | 文件名非法，或空间 / 策略拒绝 | 改文件名（去掉特殊字符）；核对账号空间与政策；仍失败换站点 |
-| 0x0.st 返回 `403` | UA 不可识别，或 IP / 账号被封禁 | 确认扩展使用默认 `MediaVault/<版本号>` UA；稍后重试；仍被拒换站点 |
+| 0x0.st 返回 `418` / `500` | 站点拒绝浏览器 UA（418）或拒绝脚本 UA（500），扩展无法改 UA | 扩展内不可用；改用 imgdb.io（图片）/ Pixeldrain（视频） |
+| imgdb.io 返回 `413` | 单图超过 16MB | 压到 16MB 以内，或改用 S3 |
+| Unlockify 等待转存超时 | 站点转存队列拥堵 | 稍后重试；大文件换 S3 / Pixeldrain |
+| Cloudinary `400`（preset 相关） | 预设不是 Unsigned，或名称写错 | 后台把 Signing Mode 改为 Unsigned，重新核对 preset 名 |
 | ImgBB `401` / `403` | API Key 无效，或账号未开通 API / 套餐不含 API | 核对 Key；在账号设置确认 API 已开通；权益以站点公告为准 |
 | Imgur `429` / `403` | 匿名 Client-ID 配额耗尽、限流或被封 | 降低上传频率；核对 Client-ID；视频受限则换 Catbox / Pixeldrain |
 
@@ -384,10 +463,13 @@
 
 ## 用哪个？一句话结论
 
-- **只想免费存图片**：ImgBB（注意 API 可能需 Pro）、Catbox、Imgur；GitHub 公开素材仓库也可以。
-- **存短视频**：Catbox（≤200MB）、Pixeldrain；大流量长期存视频用 Cloudflare R2。
-- **存大文件**：Pixeldrain（≤20GB）。
-- **只要临时分享、不在乎过期**：0x0.st。
+- **开箱就用、不想注册**：图片 → **imgdb.io**；视频 → **Unlockify**（两个都默认启用）。
+- **只想免费存图片**：imgdb.io、Catbox、Imgur；ImgBB 需申请 Key（可能要 Pro）。
+- **存短视频**：Unlockify（≤1.9GB）、Catbox（≤200MB）、Pixeldrain；大流量长期存用 Cloudflare R2。
+- **存大文件**：Pixeldrain（≤20GB）或 S3 / WebDAV。
+- **要播放页 + 内嵌代码**：Wistia（需账号）、Unlockify（免费）。
+- **要 CDN 变换（裁剪/压缩）**：Cloudinary（需账号，免费额度）。
 - **长期归档 / 要可控权限**：S3（R2）或 WebDAV。
 - **想接百度/阿里/夸克网盘**：Alist + WebDAV。
 - **已有图床/自建服务**：通用 HTTP 图床，填三个字段就能用。
+- **0x0.st**：扩展内不可用（站点拒绝浏览器 UA），别再纠结它。

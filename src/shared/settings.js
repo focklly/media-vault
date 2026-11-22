@@ -61,6 +61,17 @@ export const DEFAULT_SETTINGS = {
   excludedSites: [...DEFAULT_EXCLUDED_SITES],
   /** 各适配器配置，结构与 src/background/adapters/*.js 的 fields 对应 */
   adapters: {
+    /** 免注册、开箱能用：默认启用，但不自动上传（autoUpload.enabled 仍为 false） */
+    imgdb: {
+      enabled: true,
+      ttl: 0,
+      password: '',
+      description: '',
+    },
+    unlockify: {
+      enabled: true,
+      openPage: false,
+    },
     github: {
       enabled: false,
       token: '',
@@ -119,6 +130,21 @@ export const DEFAULT_SETTINGS = {
       enabled: false,
       clientId: '',
     },
+    cloudinary: {
+      enabled: false,
+      cloudName: '',
+      uploadPreset: '',
+      folder: '',
+    },
+    wistia: {
+      enabled: false,
+      apiPassword: '',
+      projectId: '',
+    },
+    /** 网页上传型：登记目标，扩展不代传 */
+    imgpile: { enabled: false },
+    yourimageshare: { enabled: false },
+    hippovideo: { enabled: false },
   },
 };
 

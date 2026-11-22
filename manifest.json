@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "影图管家 MediaVault",
-  "version": "1.1.0",
-  "description": "页面图片/视频自动发现，一键存入个人空间；可接 Catbox、Pixeldrain、0x0.st、ImgBB、Imgur、GitHub 图床、S3、WebDAV 网盘，支持标签与跨站转存。",
+  "version": "1.2.0",
+  "description": "页面图片/视频自动发现，一键存入个人空间；内置 imgdb.io 图床与 Unlockify 视频直链，另可接 Catbox、Pixeldrain、ImgBB、Imgur、Cloudinary、Wistia、GitHub 图床、S3、WebDAV 网盘，支持标签与跨站转存。",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "src/icons/icon-16.png",
@@ -67,3 +67,4 @@
     }
   ]
 }
+

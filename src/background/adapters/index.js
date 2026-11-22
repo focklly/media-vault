@@ -12,13 +12,34 @@ import github from './github.js';
 import s3 from './s3.js';
 import webdav from './webdav.js';
 import httpAdapter from './http.js';
+import imgdb from './imgdb.js';
+import unlockify from './unlockify.js';
+import cloudinary from './cloudinary.js';
+import wistia from './wistia.js';
 import catbox from './catbox.js';
 import pixeldrain from './pixeldrain.js';
 import zeroxzero from './zeroxzero.js';
 import imgbb from './imgbb.js';
 import imgur from './imgur.js';
+import { webOnlyAdapters } from './webonly.js';
 
-export const ADAPTERS = [github, s3, webdav, httpAdapter, catbox, pixeldrain, zeroxzero, imgbb, imgur];
+export const ADAPTERS = [
+  // 免注册、可直接直传的优先排在前面
+  imgdb,
+  unlockify,
+  github,
+  s3,
+  webdav,
+  httpAdapter,
+  cloudinary,
+  wistia,
+  catbox,
+  pixeldrain,
+  zeroxzero,
+  imgbb,
+  imgur,
+  ...webOnlyAdapters,
+];
 
 /** 供设置页渲染：剥离函数，只传可序列化的元数据 */
 export function adapterMetaList() {
@@ -31,6 +52,9 @@ export function adapterMetaList() {
     supports: a.supports,
     maxBytes: a.maxBytes === Infinity ? null : a.maxBytes,
     fields: a.fields,
+    webOnly: a.webOnly === true,
+    openUrl: a.openUrl || '',
+    note: a.note || '',
   }));
 }
 
@@ -45,6 +69,7 @@ export function getAdapter(id) {
 export async function uploadTo(adapterId, ctx) {
   const adapter = getAdapter(adapterId);
   if (!adapter) throw new Error(`未知的存储适配器：${adapterId}`);
+  if (adapter.webOnly) throw new Error(`「${adapter.label}」只支持网页上传，请在设置页点「打开站点」手动上传`);
   if (!adapter.isConfigured(ctx.config || {})) throw new Error(`「${adapter.label}」还没配置完整`);
   if (adapter.maxBytes !== Infinity && ctx.blob.size > adapter.maxBytes) {
     throw new Error(`文件超过「${adapter.label}」单文件上限，请改用 S3 / WebDAV 存大视频`);
@@ -57,6 +82,7 @@ export async function uploadTo(adapterId, ctx) {
 export async function testAdapter(adapterId, config) {
   const adapter = getAdapter(adapterId);
   if (!adapter) return { ok: false, message: `未知的存储适配器：${adapterId}` };
+  if (adapter.webOnly) return { ok: false, message: '该站点仅支持网页上传，没有可测试的接口' };
   if (!adapter.isConfigured(config || {})) return { ok: false, message: '配置不完整，请先填写必填项' };
   try {
     return await adapter.test(config);

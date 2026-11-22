@@ -7,7 +7,7 @@
 export const APP = {
   name: '影图管家',
   nameEn: 'MediaVault',
-  version: '1.1.0',
+  version: '1.2.0',
   repo: 'https://github.com/focklly/media-vault',
   docs: 'https://github.com/focklly/media-vault/tree/main/docs',
 };

@@ -1,12 +1,12 @@
 /**
- * 适配器：0x0.st（免费·临时）
+ * 适配器：0x0.st（实验性，默认关闭）
  *
- * 原理：multipart POST 到 https://0x0.st，返回纯文本直链。
- * 限制：单文件 ≤512MB；保留期随文件体积约 30–365 天，属于临时托管，不适合长期归档。
- * 注意：该站会校验 User-Agent，必须带可识别的扩展标识；伪装成浏览器 UA 会被拒绝。
- * 浏览器并不保证放行脚本设置的 User-Agent（部分版本会静默忽略），因此这里是「尽力
- * 而为 + 明确提示」：被 UA 策略拒绝时给出可诊断报错，引导换 Catbox / Pixeldrain，
- * 不引入 declarativeNetRequest 做 UA 改写。
+ * 实测结论（2026-11）：从扩展 / 脚本发请求时，
+ *   - 伪装浏览器 UA → 418（站点明确拒绝浏览器 UA）
+ *   - 其它 UA（扩展标识、curl）→ 500
+ * 也就是说：浏览器不允许脚本改写 User-Agent（forbidden header），而站点又拒绝
+ * 浏览器 UA，所以这个站点在浏览器扩展里无法稳定使用。保留适配器只是给「有代理
+ * 或自建转发」的用户留个入口，默认关闭，并用 imgdb.io / Catbox 替代。
  */
 
 import { APP, MB } from '../../shared/constants.js';
@@ -17,13 +17,13 @@ const MAX_BYTES = 512 * MB;
 export default {
   id: 'zeroxzero',
   label: '0x0.st',
-  badge: '免费·临时',
+  badge: '实验性·默认关闭',
   supports: ['image', 'video'],
   maxBytes: MAX_BYTES,
-  summary: '临时文件托管，上传快、无需注册；保留期随体积约 30–365 天，重要文件请另存长期站点。',
+  summary: '临时托管（30–365 天）。站点拒绝浏览器 UA，扩展内实测 500/418，建议改用 imgdb.io 或 Catbox。',
   docs: 'docs/ADAPTERS.md#zeroxzero',
   fields: [
-    { key: 'expires', label: '保留期小时（可选，默认按体积）', type: 'number', placeholder: '例如 720', required: false, help: '部分套餐支持指定保留时长；留空由站点按文件体积决定。' },
+    { key: 'expires', label: '保留期小时（可选，默认按体积）', type: 'number', placeholder: '例如 720', required: false, help: '留空由站点按文件体积决定；该站点在扩展内通常不可用。' },
   ],
 
   // 免注册站点：没有必填凭证
@@ -34,8 +34,13 @@ export default {
   async test() {
     try {
       const res = await fetch(API, { headers: { 'User-Agent': userAgent() } });
-      if (res.status >= 500) return { ok: false, message: `0x0.st 服务返回 ${res.status}，稍后再试` };
-      return { ok: true, message: '站点可达；上传将使用扩展自带 UA，不要伪装浏览器' };
+      if (res.status === 418) {
+        return { ok: false, message: '0x0.st 拒绝浏览器 UA（418）：扩展无法改写 UA，此站点在扩展内不可用，请改用 imgdb.io' };
+      }
+      if (res.status >= 500) {
+        return { ok: false, message: `0x0.st 返回 ${res.status}（站点对脚本请求的限制），扩展内不可用，请改用 imgdb.io` };
+      }
+      return { ok: true, message: '站点可达（能否上传仍取决于 UA 策略，建议先传一张小图验证）' };
     } catch (_) {
       return { ok: false, message: '无法连接 0x0.st，检查网络后重试' };
     }
@@ -54,13 +59,13 @@ export default {
     });
     const text = (await res.text()).trim();
     if (!res.ok) {
-      if (res.status === 403 && looksLikeUaBlock(text)) {
-        throw new Error('0x0.st 拒绝了当前 UA：浏览器可能未放行自定义 User-Agent，请改用 Catbox / Pixeldrain');
+      if (res.status === 418) {
+        throw new Error('0x0.st 拒绝浏览器 UA（418），扩展内不可用；请改用 imgdb.io / Catbox / Pixeldrain');
       }
-      throw new Error(`0x0.st 上传失败 ${res.status}：${text.slice(0, 160)}`);
+      throw new Error(`0x0.st 上传失败 ${res.status}：${text.slice(0, 120) || '站点限制'}；建议改用 imgdb.io`);
     }
     if (!/^https:\/\//.test(text)) {
-      throw new Error(`0x0.st 未返回有效链接：${text.slice(0, 160) || '站点未接受本次上传'}；若属于 UA 被拒或站点拦截，请改用 Catbox / Pixeldrain`);
+      throw new Error(`0x0.st 未返回有效链接：${text.slice(0, 160) || '站点未接受本次上传'}；建议改用 imgdb.io`);
     }
     return { url: text, path: '', size: blob.size, privateLink: false };
   },
@@ -69,9 +74,4 @@ export default {
 /** 站点要求可识别 UA；这里固定为扩展标识，不伪装成浏览器 */
 function userAgent() {
   return `${APP.nameEn}/${APP.version}`;
-}
-
-/** 响应文本是否像 UA 被拒（403 诊断用） */
-function looksLikeUaBlock(text) {
-  return /user agent|not allowed|blocked|forbidden|denied/i.test(text || '');
 }

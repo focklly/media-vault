@@ -3,6 +3,24 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 `主版本.次版本.修订号`。
 **每次改完功能请同步更新本文件并在 GitHub 推送。**
 
+## [1.2.0] - 2026-11-23
+
+### 新增
+
+- **imgdb.io** 适配器：免注册免费图床，`POST /api/v1/upload` 直传，支持保留期（0 = 永久）、访问密码、描述，单图 ≤16MB；默认启用。已实机验证返回 `https://imgdb.io/i/xxx.png`。
+- **Unlockify** 适配器：免注册视频直链，`POST /backend/api/web-upload` + 轮询 job 直到 `ready`，产出 `https://stream.unlockify.ink/video/<id>`，单文件 ≤1.9GB；默认启用。已实机验证上传 788KB 视频 → 20 秒转存完成。
+- **Cloudinary** 适配器：用无签名上传预设直传图片/视频（cloud name + upload preset），≤100MB。
+- **Wistia** 适配器：经典 `upload.wistia.com` 接口，API password 直传视频，返回播放页链接。
+- **网页上传站点登记**：ImgPile、YourImageShare、Hippo Video 加入「上传目标」，标注为「网页上传·扩展不代传」，卡片提供「打开站点」按钮（这些站点没有可用的公开直传接口）。
+
+### 变更
+
+- 设置页「上传目标」改为紧凑单行卡片：名称 + 徽标 + 单行摘要 + 测试/展开/启用；配置区默认折叠，按需展开，卡片高度约为旧版三分之一。
+- 设置页改为页内滚动：整页固定高度（header / 标签栏不动），只有内容区滚动，滚动条为自定义细条（`scrollbar-color` + `::-webkit-scrollbar`），不再出现浏览器原生滚动条。
+- 上传目标按「可直接上传（API 直传）」与「网页上传站点」分两组展示。
+- **0x0.st 降级为实验性并默认关闭**：实测站点拒绝浏览器 UA（418）、脚本 UA 返回 500，浏览器又不允许扩展改 UA，因此在扩展内不可用；测试结果会直接提示改用 imgdb.io。
+- manifest 版本 1.2.0，描述更新为 imgdb.io / Unlockify 优先。
+
 ## [1.1.0] - 2026-11-22
 
 ### 新增

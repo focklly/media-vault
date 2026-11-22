@@ -169,6 +169,7 @@ function fillKindSelect(select, kind, current) {
   select.appendChild(sentinel);
 
   for (const meta of state.adapters) {
+    if (meta.webOnly) continue;
     const cfg = state.settings?.adapters?.[meta.id];
     if (!cfg?.enabled) continue;
     const opt = document.createElement('option');
@@ -194,64 +195,126 @@ function fillKindSelect(select, kind, current) {
 /* ------------------------------ 适配器 ------------------------------ */
 
 function renderAdapters() {
-  const list = $('#adapterList');
-  list.innerHTML = '';
-  for (const meta of state.adapters) {
-    const cfg = state.settings.adapters?.[meta.id] || {};
-    const card = document.createElement('div');
-    card.className = 'adapter';
-    card.dataset.id = meta.id;
+  const host = $('#adapterList');
+  host.innerHTML = '';
 
-    card.innerHTML = `
-      <div class="adapter-head">
-        <div class="info">
-          <h3>${esc(meta.label)} <span class="adapter-badge">${esc(meta.badge || '')}</span></h3>
-          <p>${esc(meta.summary || '')}</p>
+  const direct = state.adapters.filter((a) => !a.webOnly);
+  const web = state.adapters.filter((a) => a.webOnly);
+
+  host.appendChild(groupNode('可直接上传（API 直传）', `扩展把文件直接 POST 到这些站点的接口，点「测试」可以验证配置。已启用 ${direct.filter((a) => state.settings.adapters?.[a.id]?.enabled).length} / ${direct.length} 个`, direct));
+  if (web.length) {
+    host.appendChild(groupNode('网页上传站点（点开即用，扩展不代传）', '这些站点没有公开直传接口，登记在这里方便一键打开；文件仍需在站点页面里选择。', web));
+  }
+}
+
+/** 分组标题 + 卡片容器 */
+function groupNode(title, hint, metas) {
+  const wrap = document.createElement('div');
+  wrap.className = 'adapter-group';
+  const head = document.createElement('div');
+  head.className = 'adapter-group-head';
+  head.innerHTML = `<b>${esc(title)}</b><span>${esc(hint)}</span>`;
+  wrap.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'adapter-list';
+  for (const meta of metas) list.appendChild(adapterCard(meta));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/** 单个紧凑卡片：标题行（名称/徽标/摘要）+ 右侧开关&按钮，配置区折叠 */
+function adapterCard(meta) {
+  const cfg = state.settings.adapters?.[meta.id] || {};
+  const card = document.createElement('div');
+  card.className = `adapter${cfg.enabled ? ' on' : ''}`;
+  card.dataset.id = meta.id;
+
+  const fields = meta.fields || [];
+  const tools = [
+    meta.webOnly
+      ? '<button class="mini-btn" data-open>打开站点</button>'
+      : '<button class="mini-btn" data-test>测试</button>',
+    fields.length ? '<button class="mini-btn" data-fold>展开</button>' : '',
+    `<label class="mini-switch" title="启用这个站点"><span>启用</span><input type="checkbox" data-enable ${cfg.enabled ? 'checked' : ''} /></label>`,
+  ].join('');
+
+  card.innerHTML = `
+    <div class="adapter-row">
+      <div class="adapter-main">
+        <div class="adapter-title">
+          <b>${esc(meta.label)}</b>
+          <span class="adapter-badge">${esc(meta.badge || '')}</span>
+          ${meta.maxBytes ? `<span class="adapter-limit">≤ ${formatBytes(meta.maxBytes)}</span>` : ''}
         </div>
-        <label class="switch-row" style="border:0;padding:0;gap:0">
-          <input type="checkbox" data-enable ${cfg.enabled ? 'checked' : ''} />
-        </label>
+        <p class="adapter-sum" title="${esc(meta.summary || '')}">${esc(meta.summary || '')}</p>
       </div>
-      <div class="adapter-body"></div>
+      <div class="adapter-tools">${tools}</div>
+    </div>
+    <p class="test-line" data-result hidden></p>
+    <div class="adapter-body" hidden>
+      <div class="adapter-fields"></div>
+      ${meta.note ? `<p class="adapter-note">${esc(meta.note)}</p>` : ''}
       <div class="adapter-foot">
-        <button class="ghost-btn" data-test>测试连接</button>
-        <span class="test-result" data-result></span>
         <a class="doc-link" href="${APP.repo}/blob/main/${meta.docs || 'docs/ADAPTERS.md'}" target="_blank" rel="noreferrer">配置步骤 →</a>
       </div>
-    `;
+    </div>
+  `;
 
-    const body = card.querySelector('.adapter-body');
-    for (const field of meta.fields || []) {
-      body.appendChild(renderField(meta.id, field, cfg[field.key]));
-    }
+  const body = card.querySelector('.adapter-fields');
+  for (const field of fields) body.appendChild(renderField(meta.id, field, cfg[field.key]));
 
-    card.querySelector('[data-enable]').addEventListener('change', (e) => {
-      update({ adapters: { [meta.id]: { enabled: e.target.checked } } });
+  card.querySelector('[data-enable]').addEventListener('change', (e) => {
+    card.classList.toggle('on', e.target.checked);
+    update({ adapters: { [meta.id]: { enabled: e.target.checked } } });
+  });
+
+  const foldBtn = card.querySelector('[data-fold]');
+  if (foldBtn) {
+    foldBtn.addEventListener('click', () => {
+      const hidden = card.querySelector('.adapter-body').hidden;
+      card.querySelector('.adapter-body').hidden = !hidden;
+      foldBtn.textContent = hidden ? '收起' : '展开';
+      foldBtn.classList.toggle('active', hidden);
+      card.classList.toggle('expanded', hidden);
     });
+  }
 
-    card.querySelector('[data-test]').addEventListener('click', async () => {
-      const btn = card.querySelector('[data-test]');
+  const openBtn = card.querySelector('[data-open]');
+  if (openBtn && meta.openUrl) {
+    openBtn.addEventListener('click', () => {
+      window.open(meta.openUrl, '_blank', 'noopener');
+      toast(`${meta.label} 已在新标签打开，拖入文件即可上传`);
+    });
+  }
+
+  const testBtn = card.querySelector('[data-test]');
+  if (testBtn) {
+    testBtn.addEventListener('click', async () => {
       const result = card.querySelector('[data-result]');
       const config = collectConfig(card, meta);
-      btn.disabled = true;
-      btn.textContent = '测试中…';
-      result.className = 'test-result';
-      result.textContent = '正在连接…';
+      testBtn.disabled = true;
+      const label = testBtn.textContent;
+      testBtn.textContent = '测试中…';
+      showResult(result, '', 'pending');
       try {
-        const res = await runTask(TASK.TEST_ADAPTER, { adapterId: meta.id, config }, null, 60000);
-        result.className = `test-result ${res.ok ? 'ok' : 'err'}`;
-        result.textContent = res.message || (res.ok ? '连接正常' : '连接失败');
+        const res = await runTask(TASK.TEST_ADAPTER, { adapterId: meta.id, config }, null, 90000);
+        showResult(result, res.message || (res.ok ? '连接正常' : '连接失败'), res.ok ? 'ok' : 'err');
       } catch (err) {
-        result.className = 'test-result err';
-        result.textContent = `测试失败：${err.message || err}`;
+        showResult(result, `测试失败：${err.message || err}`, 'err');
       } finally {
-        btn.disabled = false;
-        btn.textContent = '测试连接';
+        testBtn.disabled = false;
+        testBtn.textContent = label;
       }
     });
-
-    list.appendChild(card);
   }
+
+  return card;
+}
+
+function showResult(el, text, tone) {
+  el.hidden = !text;
+  el.textContent = text;
+  el.className = `test-line ${tone || ''}`;
 }
 
 function renderField(adapterId, field, value) {

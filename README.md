@@ -1,9 +1,9 @@
 # 影图管家 MediaVault
 
-一个用 Manifest V3 写的浏览器扩展：在任意网页上自动发现图片和视频，鼠标悬停即可一键存入「个人空间」；个人空间可作为图床/网盘/视频站的上传起点，支持 GitHub 仓库、S3 兼容对象存储（Cloudflare R2 / MinIO / 阿里云 OSS / 七牛）、WebDAV 网盘（坚果云 / Nextcloud / Alist）、Catbox、Pixeldrain、0x0.st、ImgBB、Imgur，以及任意返回 JSON 的 HTTP 图床。
+一个用 Manifest V3 写的浏览器扩展：在任意网页上自动发现图片和视频，鼠标悬停即可一键存入「个人空间」；个人空间可作为图床/网盘/视频站的上传起点，支持 imgdb.io 图床、Unlockify 视频直链、GitHub 仓库、S3 兼容对象存储（Cloudflare R2 / MinIO / 阿里云 OSS / 七牛）、WebDAV 网盘（坚果云 / Nextcloud / Alist）、Cloudinary、Wistia、Catbox、Pixeldrain、ImgBB、Imgur，以及任意返回 JSON 的 HTTP 图床。
 
 > 仓库：<https://github.com/focklly/media-vault>
-> 版本：v1.1.0 ｜ 浏览器：Chrome / Edge 116+
+> 版本：v1.2.0 ｜ 浏览器：Chrome / Edge 116+
 
 ![悬浮球与悬停按钮](docs/images/e2e-hover-pill.png)
 
@@ -31,7 +31,7 @@
 | 页面拾取 | 悬浮球（可拖动、位置记忆）、悬停按钮、右键菜单、`Shift+单击` 直接上传 |
 | 自动扫描 | `<img>` / `srcset` / `<picture>` / CSS 背景图 / 懒加载属性 / `<video>` + `<source>` / `a[href=mp4]` / `og:image` / `og:video` |
 | 个人空间 | 网格图库、类型/状态筛选、全文搜索、四档排序、预览弹窗、收藏、批量上传/删除/导出、清单 JSON 备份 |
-| 存储适配器 | GitHub 仓库、S3 兼容（SigV4 直传）、WebDAV、通用 HTTP 图床，以及 Catbox / Pixeldrain / 0x0.st / ImgBB / Imgur 免费站点；配置项自动渲染、连接测试 |
+| 存储适配器 | imgdb.io / Unlockify 默认启用，GitHub、S3 兼容（SigV4 直传）、WebDAV、通用 HTTP 图床、Cloudinary、Wistia、Catbox / Pixeldrain / ImgBB / Imgur，另有 ImgPile / YourImageShare / Hippo 网页上传入口；配置项自动渲染、连接测试 |
 | 多站点调度 | 多站点同时启用；可分别为图片、视频设置默认站点，并设全局兜底站点 |
 | 跨站转存 | 条目在站点间互相转存，保留转存历史 |
 | 标签管理 | 图片/视频打标签，支持按标签搜索与标签快捷筛选 |
@@ -66,7 +66,8 @@
 
 | 需求 | 推荐 | 原因 |
 | --- | --- | --- |
-| 只想零成本存图 | GitHub 仓库 | 免费、有版本历史、raw 链接可直接当图床（单文件 ≤ 40MB） |
+| 不想注册、点开就用 | **imgdb.io**（图）/ **Unlockify**（视频） | 两个都免注册、默认启用，已验证可直传 |
+| 想零成本存图 + 要版本历史 | GitHub 仓库 | 免费、有版本历史、raw 链接可直接当图床（单文件 ≤ 40MB） |
 | 存视频、流量大 | Cloudflare R2 | 免费 10GB 存储 + 出网流量不计费，S3 兼容 |
 | 想接百度网盘/阿里云盘/夸克 | Alist + WebDAV | Alist 把这些网盘挂载成本地 WebDAV，扩展直接写 |
 | 已有自建图床 | 通用 HTTP 图床 | 填 URL、字段名、返回 JSON 路径即可，无需改代码 |
@@ -75,9 +76,13 @@
 
 | 站点 | 支持类型 | 免费额度 | 是否需注册 |
 | --- | --- | --- | --- |
+| imgdb.io | 仅图片 | 单图 ≤16MB，可设永久/密码 | 否（默认启用） |
+| Unlockify | 仅视频 | 单文件 ≤1.9GB，出播放页/直链 | 否（默认启用） |
 | Catbox | 图片 + 视频 | 单文件 ≤200MB，永久保留 | 否（用户哈希可选） |
 | Pixeldrain | 图片 + 视频 | 单文件 ≤20GB，至少保留约两个月 | 可选（API Key 可选） |
-| 0x0.st | 图片 + 视频 | 单文件 ≤512MB，保留期约 30–365 天 | 否 |
+| Cloudinary | 图片 + 视频 | 免费额度按账号计 | 是（Cloud name + unsigned preset） |
+| Wistia | 视频 | 免费版有数量限制 | 是（API password） |
+| 0x0.st | 图片 + 视频 | 单文件 ≤512MB | 否（实验性：站点拒绝浏览器 UA，扩展内不可用） |
 | ImgBB | 仅图片 | 单图 ≤32MB | 是（API Key 必填；API 可能需 Pro） |
 | Imgur | 图片 / GIF / mp4 | 单文件约 ≤200MB，视频 ≤60s | 是（Client-ID 必填） |
 
@@ -180,3 +185,4 @@ pwsh tools/pack.ps1      # 产出 dist/media-vault-1.0.0.zip
 ## 许可
 
 [MIT](LICENSE) © 2026 focklly
+
