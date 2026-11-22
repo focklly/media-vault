@@ -36,7 +36,8 @@
     "notifications",
     "downloads",
     "scripting",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "http://*/*",

@@ -1188,6 +1188,17 @@
     return found.map((f) => f.url).slice(0, 8);
   }
 
+  /** 探针可能比播放器慢一步（首帧缓冲、切集），点存入时再等一会儿 */
+  async function douyinVideoUrlsReady(timeoutMs = 6000) {
+    const end = Date.now() + timeoutMs;
+    while (true) {
+      const list = await douyinVideoUrls();
+      if (list.length) return list;
+      if (Date.now() > end) return [];
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+
   /** 读页面主世界探针（main-hook.js）写到 DOM 属性里的媒体地址 */
   function readProbedMedia() {
     try {
@@ -1270,7 +1281,7 @@
           // MediaSource（MSE）播放的 blob: 没有可读字节（B 站、YouTube 等都这样），
           // 视频退化成「仅链接记录」，把页面地址和封面存进来，而不是直接失败
           if (media.kind === KIND.VIDEO) {
-            const douyinUrl = isDouyinPage() ? await douyinVideoUrls() : [];
+            const douyinUrl = isDouyinPage() ? await douyinVideoUrlsReady() : [];
             if (isBilibiliPage()) {
               // B 站：让后台用 playurl 接口解析出真正的 mp4 直链并下载
               payload.url = location.href;
@@ -1334,7 +1345,7 @@
       await scanPage({ silent: true });
     }
     const bili = isBilibiliPage();
-    const douyinUrls = isDouyinPage() ? await douyinVideoUrls() : [];
+    const douyinUrls = isDouyinPage() ? await douyinVideoUrlsReady() : [];
     const items = state.inventory.map((i) => {
       if (!(i.blobUrl && i.kind === KIND.VIDEO)) return buildPayload(i);
       if (bili) return buildPayload(i, { url: location.href, bilibiliResolve: true });
@@ -1489,4 +1500,5 @@
     init();
   }
 })();
+
 

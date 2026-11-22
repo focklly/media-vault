@@ -9,7 +9,7 @@
  * 所有写操作（上传、删除）都通过后台端口任务执行，页面只负责发起与展示进度。
  */
 
-import { KIND, TASK } from '../shared/constants.js';
+import { KIND, TASK, MSG } from '../shared/constants.js';
 import {
   listItems, getStats, getBlob, getItem, updateItem, deleteItems,
   exportManifest, importManifest,
@@ -152,6 +152,82 @@ async function refresh() {
   [...state.selected].forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   applyFilter();
   renderStorage();
+  ensureVideoThumbs();
+}
+
+/**
+ * 视频缩略图取「视频第一帧」：后台没有 DOM，没法解视频，
+ * 所以由图库页把本地副本塞进隐藏 <video>，seek 到 0 后 canvas 抽帧，
+ * 再回传给后台落成缩略图（每页最多补几张，避免一次抽太多卡住）。
+ */
+const thumbTried = new Set();
+async function ensureVideoThumbs() {
+  // 视频一律重抽一次首帧（老的缩略图是页面封面，不是视频本身）
+  const todo = state.items
+    .filter((i) => i.kind === KIND.VIDEO && i.files?.orig && !thumbTried.has(i.id))
+    .slice(0, 3);
+  if (!todo.length) return;
+  for (const it of todo) {
+    thumbTried.add(it.id);
+    try {
+      const blob = await getBlob(it.files.orig);
+      if (!blob) continue;
+      const frame = await captureFirstFrame(blob);
+      if (!frame) continue;
+      await sendMessage(MSG.SET_VIDEO_THUMB, { id: it.id, dataUrl: frame });
+      // 顺手判断有没有音轨：抖音分轨下载的旧文件可能只有画面
+      try {
+        const head = await blob.slice(0, 65536).arrayBuffer();
+        const bytes = new Uint8Array(head);
+        let text = '';
+        for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+        const hasAudio = text.includes('soun');
+        if (!hasAudio && it.audioMissing !== true) await updateItem(it.id, { audioMissing: true });
+        if (hasAudio && it.audioMissing === true) await updateItem(it.id, { audioMissing: false });
+      } catch (_) { /* 读不了头部就算了 */ }
+      await refresh();
+    } catch (_) { /* 抽帧失败就保持占位，不影响其他条目 */ }
+  }
+}
+
+function captureFirstFrame(blob) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.src = url;
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      v.remove();
+      resolve(val);
+    };
+    const timer = setTimeout(() => done(''), 6000);
+    const draw = () => {
+      try {
+        if (!v.videoWidth || !v.videoHeight) return done('');
+        const scale = Math.min(1, 480 / Math.max(v.videoWidth, v.videoHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(v.videoWidth * scale));
+        c.height = Math.max(1, Math.round(v.videoHeight * scale));
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        done(c.toDataURL('image/jpeg', 0.82));
+      } catch (_) {
+        done('');
+      }
+    };
+    v.addEventListener('error', () => done(''));
+    v.addEventListener('loadeddata', () => {
+      if (v.currentTime > 0) return draw();
+      v.currentTime = 0;
+    });
+    v.addEventListener('seeked', draw);
+  });
 }
 
 function applyFilter() {
@@ -496,9 +572,13 @@ async function openModal(id) {
     ['尺寸', item.width && item.height ? `${item.width} × ${item.height}` : '未知'],
     ['体积', formatBytes(item.size || 0)],
     ['时长', item.kind === KIND.VIDEO && item.duration ? formatDuration(item.duration) : '—'],
+    ['音轨', item.kind === KIND.VIDEO ? (item.audioMissing ? '缺失（点「重新抓取带音轨版本」修）' : '正常') : '—'],
     ['来源站点', item.site || '—'],
     ['入库时间', formatDate(item.createdAt)],
     ['上传状态', item.remote?.url ? `已上传（${labelFor(item.remote.adapterId)}）` : (item.remote?.error ? `失败（${labelFor(item.remote.adapterId)}）` : '未上传')],
+    ['本地副本', item.files?.orig
+      ? `已存本机 · ${formatBytes(item.size || 0)}（浏览器 IndexedDB 内部存储，没有对外地址；要文件用下方「下载到本地」）`
+      : (item.status === 'link-only' ? '无本地文件（仅链接记录）' : '无')],
     ['远程链接', item.remote?.url || '—', item.remote?.url],
     ['来源页', item.pageUrl || '—', item.pageUrl],
     ['原始链接', item.sourceUrl || '—', item.sourceUrl],
@@ -508,7 +588,7 @@ async function openModal(id) {
     rows.push(['转存历史', history.map((h) => `${labelFor(h.adapterId)}${h.at ? ` · ${formatDate(h.at)}` : ''}`).join(' → ')]);
   }
   $('#mInfo').innerHTML = rows.map(([k, v, link]) => {
-    const wide = k === '来源页' || k === '原始链接' || k === '备注' || k === '转存历史';
+    const wide = k === '来源页' || k === '原始链接' || k === '本地副本' || k === '备注' || k === '转存历史';
     const value = link
       ? `<b title="${escapeAttr(v)}"><a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">${esc(v)}</a></b>`
       : `<b title="${escapeAttr(v)}">${esc(v)}</b>`;
@@ -567,13 +647,24 @@ async function openModal(id) {
   };
 
   const alreadyRemote = Boolean(item.remote?.url);
-  btn(alreadyRemote ? '转存到该站点' : '上传到该站点', 'primary', async () => {
+  const uploadBtn = btn(alreadyRemote ? '转存到该站点' : '上传到该站点', 'primary', async () => {
     if (!select.value) {
       toast('请先到设置页启用并配置上传目标', true);
       return;
     }
-    if (alreadyRemote) await transferOne(item.id, select.value);
-    else await uploadOne(item.id, select.value);
+    // 上传可能几十秒，按钮要立刻给出「点到了」的反馈，进度面板也要盖在弹窗之上
+    const label = uploadBtn.textContent;
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = alreadyRemote ? '转存中…' : '上传中…';
+    select.disabled = true;
+    try {
+      if (alreadyRemote) await transferOne(item.id, select.value);
+      else await uploadOne(item.id, select.value);
+    } finally {
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = label;
+      select.disabled = false;
+    }
   });
   btn(item.fav === 1 ? '取消收藏' : '收藏', '', async () => {
     await updateItem(item.id, { fav: item.fav === 1 ? 0 : 1 });
@@ -581,6 +672,21 @@ async function openModal(id) {
     closeModal();
   });
   btn('复制链接', '', () => copyLink(item));
+  if (item.kind === KIND.VIDEO) {
+    btn('重新抓取带音轨版本', '', async () => {
+      showProgress('正在重新抓取带音轨版本…', 0, 1, '抖音合轨 mp4');
+      try {
+        const res = await runTask(TASK.FIX_VIDEO_AUDIO, { id: item.id });
+        toast(`已换成带音轨版本（${formatBytes(res.item?.size || 0)}）`);
+        closeModal();
+        await refresh();
+      } catch (err) {
+        toast(`重新抓取失败：${err.message || err}`, true, 4200);
+      } finally {
+        hideProgress();
+      }
+    });
+  }
   if (item.pageUrl) btn('打开来源页', '', () => window.open(item.pageUrl, '_blank', 'noreferrer'));
   if (item.files?.orig) {
     btn('下载到本地', '', async () => {
@@ -738,18 +844,39 @@ async function deleteSelected() {
   }
 }
 
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) { /* 没焦点或被策略拦下，退回 execCommand */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function copyLink(item) {
   const link = item.remote?.url || item.sourceUrl;
   if (!link) {
     toast('没有可复制的链接', true);
     return;
   }
-  try {
-    await navigator.clipboard.writeText(link);
-    toast(item.remote?.url ? '远程链接已复制' : '原始链接已复制（该条目尚未上传）');
-  } catch (_) {
-    toast('复制失败，请手动复制', true);
+  const ok = await copyText(link);
+  if (!ok) {
+    toast('复制失败：浏览器不给剪贴板权限，请点开「原始链接」手动复制', true, 4200);
+    return;
   }
+  toast(item.remote?.url ? '远程链接已复制' : '已复制原始链接（该条目还没上传）');
 }
 
 async function downloadSelected() {

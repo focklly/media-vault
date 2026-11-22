@@ -25,6 +25,7 @@ export const MSG = {
   IMPORT_ONE: 'MV_IMPORT_ONE',          // 悬停按钮单条入库
   OPEN_LIBRARY: 'MV_OPEN_LIBRARY',      // 打开个人空间
   OPEN_SETTINGS: 'MV_OPEN_SETTINGS',    // 打开设置
+  SET_VIDEO_THUMB: 'MV_SET_VIDEO_THUMB', // 图库页抽取视频首帧后回传缩略图
   // background -> content
   GET_TAB_STATS: 'MV_GET_TAB_STATS',    // popup 查询当前页统计
   SCAN_NOW: 'MV_SCAN_NOW',              // popup 触发重新扫描
@@ -42,6 +43,7 @@ export const TASK = {
   TRANSFER: 'transfer',           // 跨站转存（把本地副本或旧远程链接搬到目标站点，保留历史）
   TEST_ADAPTER: 'test-adapter',   // 连接测试
   DELETE: 'delete',               // 批量删除
+  FIX_VIDEO_AUDIO: 'fix-video-audio', // 抖音旧条目：按 vid 重新抓带音轨的合轨 mp4
 };
 
 /** 长任务端口名 */

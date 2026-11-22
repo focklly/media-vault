@@ -37,9 +37,9 @@ const ICON_128 = 'src/icons/icon-128.png';
  * 对跨源请求会被裁掉，所以只能用 declarativeNetRequest 在扩展发起的请求上加 Referer。
  */
 const DOUYIN_REFERER_RULE_ID = 9101;
+const DOUYIN_PLAY_RULE_ID = 9102;
 function ensureDouyinRefererRule() {
-  const rule = {
-    id: DOUYIN_REFERER_RULE_ID,
+  const common = {
     priority: 1,
     action: {
       type: 'modifyHeaders',
@@ -48,14 +48,29 @@ function ensureDouyinRefererRule() {
         { header: 'origin', operation: 'remove' },
       ],
     },
-    condition: {
-      urlFilter: '||douyinvod.com',
-      resourceTypes: ['xmlhttprequest', 'media', 'other'],
-      tabIds: [-1],
-    },
   };
+  const rules = [
+    {
+      ...common,
+      id: DOUYIN_REFERER_RULE_ID,
+      condition: {
+        urlFilter: '||douyinvod.com',
+        resourceTypes: ['xmlhttprequest', 'media', 'other'],
+        tabIds: [-1],
+      },
+    },
+    {
+      ...common,
+      id: DOUYIN_PLAY_RULE_ID,
+      condition: {
+        urlFilter: '||douyin.com/aweme/v1/play',
+        resourceTypes: ['xmlhttprequest', 'media', 'other'],
+        tabIds: [-1],
+      },
+    },
+  ];
   chrome.declarativeNetRequest
-    .updateSessionRules({ removeRuleIds: [DOUYIN_REFERER_RULE_ID], addRules: [rule] })
+    .updateSessionRules({ removeRuleIds: [DOUYIN_REFERER_RULE_ID, DOUYIN_PLAY_RULE_ID], addRules: rules })
     .catch(() => {});
 }
 ensureDouyinRefererRule();
@@ -187,9 +202,22 @@ async function handleShortMessage(msg, sender) {
     case MSG.OPEN_SETTINGS:
       chrome.runtime.openOptionsPage();
       return { ok: true };
+    case MSG.SET_VIDEO_THUMB: {
+      // 图库页用 <video> 抽出视频第一帧后回传，这里落成缩略图
+      const { id, dataUrl } = msg.payload || {};
+      if (!id || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return { ok: false };
+      const item = await getItem(id);
+      if (!item) return { ok: false };
+      const thumbBlob = dataUrlToBlob(dataUrl);
+      const thumb = await makeThumb(thumbBlob, KIND.IMAGE);
+      if (!thumb) return { ok: false };
+      const key = `${id}:thumb`;
+      await putBlob(key, id, thumb);
+      await updateItem(id, { files: { ...(item.files || {}), thumb: key } });
+      return { ok: true };
+    }
     case 'MV_GET_ADAPTER_META':
-      return { ok: true, adapters: adapterMetaList() };
-    case 'MV_GET_SETTINGS':
+      return { ok: true, adapters: adapterMetaList() };    case 'MV_GET_SETTINGS':
       return { ok: true, settings: await getSettings() };
     case 'MV_GET_STATS':
       return { ok: true, stats: await getStats() };
@@ -237,6 +265,8 @@ async function runTask(type, payload, progress) {
       return importBatch(payload, settings, progress);
     case TASK.UPLOAD:
       return uploadOne(payload.id, payload.adapterId, settings);
+    case TASK.FIX_VIDEO_AUDIO:
+      return fixVideoAudio(payload.id).then((item) => ({ item }));
     case TASK.UPLOAD_BATCH:
       return uploadMany(payload.ids, payload.adapterId, settings, progress);
     case TASK.TRANSFER:
@@ -366,11 +396,11 @@ async function importMedia(raw, settings) {
       throw new Error(`视频 ${formatBytes(blob.size)} 超过单文件上限 ${formatBytes(maxBytes)}`);
     }
   } else if (raw.douyinCandidates && raw.douyinCandidates.length) {
-    // 抖音：探针抓到的是 m4s 分轨，其中一半是纯音频。先小范围取头部验轨，
-    // 挑出真正带 vide 轨道的那个再整段下载。
-    const picked = await resolveDouyinVideo(raw.douyinCandidates);
-    const fetched = picked
-      ? await fetchMedia(picked, 'https://www.douyin.com/')
+    // 抖音：探针抓到的是 m4s 分轨，先读轨道头部（顺带拿 vid），
+    // 再用 play 接口换取音视频合轨的渐进式 mp4，避免存下来没声音。
+    const resolved = await resolveDouyinVideo(raw.douyinCandidates);
+    const fetched = resolved
+      ? await fetchMedia(resolved.url, 'https://www.douyin.com/')
       : { ok: false, reason: '候选地址里没有视频轨（只有音频或已过期）' };
     if (!fetched.ok) {
       item.status = 'link-only';
@@ -385,7 +415,10 @@ async function importMedia(raw, settings) {
     }
     blob = fetched.blob;
     item.mime = fetched.mime;
-    item.sourceUrl = picked;
+    item.sourceUrl = resolved.url;
+    if (!resolved.merged) {
+      item.note = '抖音只拿到视频轨（无音轨），播放时会没声音；建议换条视频重试';
+    }
   } else if (raw.stream) {
     // m3u8 / mpd 分片流，扩展无法整体下载，保存为“流媒体记录”
     item.status = 'link-only';
@@ -497,30 +530,81 @@ async function resolveBilibiliVideo(pageUrl) {
   }
 }
 
-/** 抖音 m4s：只取前 64KB 看有没有 vide 轨道（纯音频轨只有 soun） */
-async function hasVideoTrack(url) {
+/** 抖音旧条目重抓：本地副本里能读到 vid，就用 play 接口换音视频合轨版本，覆盖原文件 */
+async function fixVideoAudio(id) {
+  const item = await getItem(id);
+  if (!item) throw new Error('条目不存在');
+  const blob = item.files?.orig ? await getBlob(item.files.orig) : null;
+  if (!blob) throw new Error('这条没有本地副本，无法重新抓取');
+  const headBuf = await blob.slice(0, 65536).arrayBuffer();
+  const head = asciiOf(new Uint8Array(headBuf));
+  if (head.includes('soun')) {
+    await updateItem(id, { audioMissing: false });
+    return getItem(id);
+  }
+  const vid = /vid:(v[0-9A-Za-z]+)/.exec(head)?.[1];
+  if (!vid) throw new Error('本地文件里读不到抖音 vid，请重新在抖音页存入');
+  const url = `https://www.douyin.com/aweme/v1/play/?video_id=${vid}&ratio=1080p&line=0&watermark=0`;
+  const fetched = await fetchMedia(url, 'https://www.douyin.com/');
+  if (!fetched.ok) throw new Error(fetched.reason);
+  await putBlob(`${item.id}:orig`, item.id, fetched.blob);
+  await updateItem(id, {
+    size: fetched.blob.size,
+    mime: fetched.mime,
+    sourceUrl: url,
+    note: '',
+    audioMissing: false,
+  });
+  return getItem(id);
+}
+
+/** 把字节当 ASCII 扫一遍（mp4 的 box 名/元信息都是可见 ASCII） */
+function asciiOf(bytes) {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i]);
+  return out;
+}
+
+/** 抖音 m4s：取前 64KB 判断轨道类型；纯音频轨只有 soun，视频轨带 vide（还能读出 vid） */
+async function douyinTrackInfo(url) {
   try {
     const res = await fetch(url, {
       headers: { Range: 'bytes=0-65535', Accept: '*/*' },
       credentials: 'include',
       referrer: 'https://www.douyin.com/',
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const buf = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
     let text = '';
     for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
-    return text.includes('vide');
+    const vid = /vid:(v[0-9A-Za-z]+)/.exec(text);
+    return { hasVideo: text.includes('vide'), hasAudio: text.includes('soun'), vid: vid ? vid[1] : '' };
   } catch (_) {
-    return false;
+    return null;
   }
 }
 
+/**
+ * 抖音播放器用的是 m4s 分轨（视频轨 + 音频轨分开），直接下视频轨会没声音。
+ * 从轨道头部能读到 vid，拿 vid 调老版 play 接口可以换到「音视频合轨」的渐进式 mp4。
+ * 换不到就退回视频轨（至少能存下画面），并在备注里说明无音轨。
+ */
 async function resolveDouyinVideo(candidates) {
+  let fallback = '';
   for (const u of candidates.slice(0, 8)) {
-    if (await hasVideoTrack(u)) return u;
+    if (/media-audio/i.test(u)) continue;
+    const info = await douyinTrackInfo(u);
+    if (!info || !info.hasVideo) continue;
+    if (!fallback) fallback = u;
+    if (info.vid) {
+      return {
+        url: `https://www.douyin.com/aweme/v1/play/?video_id=${info.vid}&ratio=1080p&line=0&watermark=0`,
+        merged: true,
+      };
+    }
   }
-  return '';
+  return fallback ? { url: fallback, merged: false } : null;
 }
 
 async function fetchMedia(url, pageUrl) {  if (url.startsWith('data:')) {
