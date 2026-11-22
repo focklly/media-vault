@@ -10,7 +10,7 @@
 import { STORAGE_KEY, DEFAULT_EXCLUDED_SITES, MB } from './constants.js';
 
 export const DEFAULT_SETTINGS = {
-  version: 1,
+  version: 2,
   /** 总开关：关闭后内容脚本不显示任何浮层 */
   enabled: true,
   ball: {
@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS = {
   },
   /** 入库后自动上传到哪个适配器；'none'/空串 表示未指定，按路由顺序兜底 */
   autoUpload: {
-    enabled: false,
+    enabled: true,
     adapterId: 'none',
     /** 按媒体类型单独指定站点；空串 = 跟随全局默认 adapterId */
     byKind: {
@@ -167,7 +167,14 @@ function deepMerge(base, patch) {
 export async function getSettings() {
   const raw = await chrome.storage.local.get(STORAGE_KEY.SETTINGS);
   const stored = raw[STORAGE_KEY.SETTINGS] || {};
-  return deepMerge(DEFAULT_SETTINGS, stored);
+  const merged = deepMerge(DEFAULT_SETTINGS, stored);
+  // v2 迁移：v1 的默认是「只存本地」，用户希望点一下就直传默认图床/视频站，这里一次性打开自动上传
+  if (Number(stored.version || 1) < 2) {
+    merged.version = 2;
+    merged.autoUpload = { ...merged.autoUpload, enabled: true };
+    await chrome.storage.local.set({ [STORAGE_KEY.SETTINGS]: merged });
+  }
+  return merged;
 }
 
 /** patch 传入部分字段即可，写回时做深合并 */
@@ -207,3 +214,4 @@ export function maxImportBytes(settings) {
   const mb = Number(settings?.importRules?.maxMB) || 512;
   return Math.max(1, mb) * MB;
 }
+

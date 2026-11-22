@@ -10,7 +10,7 @@ import { getSettings, saveSettings } from '../shared/settings.js';
 import { getStats, exportManifest, importManifest, clearAll } from '../shared/db.js';
 import { runTask, sendMessage } from '../shared/messaging.js';
 import { formatBytes } from '../shared/utils.js';
-import { adapterSupports, unsupportedReason } from '../shared/routing.js';
+import { adapterSupports, adapterConfigured } from '../shared/routing.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -172,14 +172,12 @@ function fillKindSelect(select, kind, current) {
     if (meta.webOnly) continue;
     const cfg = state.settings?.adapters?.[meta.id];
     if (!cfg?.enabled) continue;
+    // 不支持的、没配好的站点不出现在下拉里，避免「选了就报错」
+    if (kind && !adapterSupports(meta, kind)) continue;
+    if (!adapterConfigured(meta, cfg)) continue;
     const opt = document.createElement('option');
     opt.value = meta.id;
-    if (kind && !adapterSupports(meta, kind)) {
-      opt.disabled = true;
-      opt.textContent = `${meta.label}（${unsupportedReason(kind)}）`;
-    } else {
-      opt.textContent = meta.label;
-    }
+    opt.textContent = meta.label;
     select.appendChild(opt);
   }
 
@@ -482,3 +480,4 @@ init().catch((err) => {
   console.error(err);
   toast(`初始化失败：${err.message || err}`, true, 5000);
 });
+

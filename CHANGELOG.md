@@ -3,6 +3,20 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 `主版本.次版本.修订号`。
 **每次改完功能请同步更新本文件并在 GitHub 推送。**
 
+## [1.2.2] - 2026-11-22
+
+### 新增
+
+- **抖音视频真下载**：抖音播放器走 m4s 分轨（音、视频各一条），页面里只有 `blob:`。新增 MAIN world 探针 `src/content/main-hook.js`（`document_start` 起接管 `fetch` / `XMLHttpRequest.open` / `URL.createObjectURL`），把播放器真实请求的 `douyinvod` 地址写进 `documentElement` 的 `data-mv-media` 属性，隔离世界即可读取。入库时把整组候选交给后台，后台先带 `Range` 取头部 64KB 验轨（只留含 `vide` 轨的那条，排除纯音频 m4s）再整段下载。
+- **抖音防盗链处理**：`douyinvod.com` 无 Referer 一律 403，而扩展后台 fetch 的 `referrer` 在跨源请求里会被裁掉。改用 `declarativeNetRequest` 会话规则给扩展发起的 `douyinvod` 请求补 `Referer: https://www.douyin.com/`。实机验证一条抖音视频存下 11.2MB `video/mp4`（status `ready`，同时直传 Unlockify 成功）。
+- **上传目标只列「现在就能用」的站点**：图库/设置页的下拉只输出「已启用 + 必填配置齐全 + 支持该媒体类型」的适配器；没配 Key、只支持网页上传、或能力不适配的站点直接不出现（不再灰显占位）。
+- **入库即直传**：`autoUpload` 默认开启（设置 v2 迁移一次性打开），点「存入」后直接落到默认图床/视频站，toast 直接给出「已直传 · 站点 · 标题」或「已存本地，直传失败：…」。
+
+### 修复
+
+- **点「上传」没反应**：补上进度面板反馈——上传开始即显示「正在上传到 <站点>…」，随后每秒刷新已用时与站点转存状态；Unlockify 轮询上限从 75s 放宽到 300s（大文件转存更久，之前是等到超时白等）。
+- **失败被误报成「已存在相同链接，跳过」**：`saveOne` 现在区分「导入失败」与「重复跳过」，把后台真实错误（如 `下载失败 HTTP 403`）原样弹出来。
+
 ## [1.2.1] - 2026-11-22
 
 ### 新增

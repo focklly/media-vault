@@ -17,7 +17,7 @@ import {
 import { getSettings } from '../shared/settings.js';
 import { runTask, sendMessage } from '../shared/messaging.js';
 import { formatBytes, formatDuration, formatDate, hostOf } from '../shared/utils.js';
-import { resolveTargetAdapter, adapterLabel, adapterSupports, unsupportedReason } from '../shared/routing.js';
+import { resolveTargetAdapter, adapterLabel, adapterSupports, adapterConfigured } from '../shared/routing.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -548,7 +548,7 @@ async function openModal(id) {
   });
   if (!adapterOptions.length) {
     const opt = document.createElement('option');
-    opt.textContent = '尚未启用上传目标';
+    opt.textContent = '没有可用站点，请先去设置页配置';
     opt.value = '';
     select.appendChild(opt);
     select.disabled = true;
@@ -610,24 +610,22 @@ function closeModal() {
 
 /* ------------------------------ 操作 ------------------------------ */
 
-/** 带启用态的适配器描述，供共享路由与名称解析使用 */
+/** 带启用态与可用性的适配器描述，供共享路由与名称解析使用 */
 function descriptors() {
   return state.adapters.map((a) => ({
     ...a,
     enabled: state.settings?.adapters?.[a.id]?.enabled === true,
+    ready: adapterConfigured(a, state.settings?.adapters?.[a.id]),
   }));
 }
 
-/** 下拉选项：已启用站点；不支持该类型的禁用并写明原因 */
+/** 下拉选项：只保留「现在就能用」的站点（已启用 + 配置齐全 + 支持该类型 + 非网页入口） */
 function adapterOptionsFor(kind) {
   return state.adapters
     .filter((a) => state.settings?.adapters?.[a.id]?.enabled)
-    .map((a) => ({
-      id: a.id,
-      label: a.label,
-      disabled: kind ? !adapterSupports(a, kind) : false,
-      reason: kind && !adapterSupports(a, kind) ? unsupportedReason(kind) : '',
-    }));
+    .filter((a) => adapterConfigured(a, state.settings?.adapters?.[a.id]))
+    .filter((a) => !kind || adapterSupports(a, kind))
+    .map((a) => ({ id: a.id, label: a.label, disabled: false, reason: '' }));
 }
 
 /** 按类型走共享路由解析默认站点 */
@@ -657,13 +655,13 @@ async function uploadOne(id, adapterId) {
   const item = await getItem(id);
   const target = adapterId || defaultAdapterId(item?.kind);
   if (!target) {
-    toast('还没有启用上传目标，先到设置页配置站点', true, 3600);
+    toast('没有可用的上传目标，先到设置页启用并填好配置', true, 3600);
     return;
   }
-  showProgress('正在上传…', 0, 1);
+  showProgress(`正在上传到 ${labelFor(target)}…`, 0, 1, '准备上传');
   try {
     const res = await runTask(TASK.UPLOAD, { id, adapterId: target }, (p) => {
-      showProgress('正在上传…', p.done || 0, p.total || 1, p.message);
+      showProgress(`正在上传到 ${labelFor(target)}…`, p.done || 0, p.total || 1, p.message || '');
     });
     toast(res.item?.remote?.url ? `已上传到 ${labelFor(res.item.remote.adapterId)}，链接已保存` : '上传完成');
     await refresh();
@@ -804,6 +802,8 @@ function showProgress(title, done, total, detail = '') {
   el.querySelector('b').textContent = title;
   const pct = total ? Math.min(100, (done / total) * 100) : 0;
   el.querySelector('i').style.width = `${pct}%`;
+  // 单条上传/等待转存没有百分比时，用无限循环的滚动条表示“还在干活”
+  el.classList.toggle('indet', !total || (total === 1 && done === 0));
   const small = el.querySelector('small');
   small.textContent = detail || (total ? `${done}/${total}` : '');
 }

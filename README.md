@@ -3,7 +3,7 @@
 一个用 Manifest V3 写的浏览器扩展：在任意网页上自动发现图片和视频，鼠标悬停即可一键存入「个人空间」；个人空间可作为图床/网盘/视频站的上传起点，支持 imgdb.io 图床、Unlockify 视频直链、GitHub 仓库、S3 兼容对象存储（Cloudflare R2 / MinIO / 阿里云 OSS / 七牛）、WebDAV 网盘（坚果云 / Nextcloud / Alist）、Cloudinary、Wistia、Catbox、Pixeldrain、ImgBB、Imgur、ImgPile，以及任意返回 JSON 的 HTTP 图床；B 站视频可直接存成 mp4 文件。
 
 > 仓库：<https://github.com/focklly/media-vault>
-> 版本：v1.2.1 ｜ 浏览器：Chrome / Edge 116+
+> 版本：v1.2.2 ｜ 浏览器：Chrome / Edge 116+
 
 ![悬浮球与悬停按钮](docs/images/e2e-hover-pill.png)
 

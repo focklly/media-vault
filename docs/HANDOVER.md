@@ -7,7 +7,7 @@
 | --- | --- |
 | 项目名 | 影图管家 MediaVault |
 | 仓库 | <https://github.com/focklly/media-vault> |
-| 当前版本 | v1.2.1 |
+| 当前版本 | v1.2.2 |
 | 交接日期 | 2026-11-22 |
 | 技术栈 | Manifest V3 + 原生 JS（无构建、无框架、无后端） |
 | 目标浏览器 | Chrome / Edge 116+ |
@@ -20,7 +20,7 @@
 | 交付物 | 位置 | 说明 |
 | --- | --- | --- |
 | 扩展源码 | 仓库根目录 | 可直接「加载已解压的扩展程序」 |
-| 可分发包 | `dist/media-vault-1.2.1.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
+| 可分发包 | `dist/media-vault-1.2.2.zip` | 由 `tools/pack.ps1` 生成，仅含 manifest + src |
 | 图标 | `src/icons/icon-{16,32,48,128}.png` | 由 `tools/make-icons.mjs` 纯 Node 生成，可复现 |
 | 测试页 | `tools/testbed.html` | 覆盖 img/srcset/懒加载/背景图/video/直链/meta 六类场景 |
 | 工程脚本 | `tools/check.ps1`、`tools/pack.ps1` | 语法+manifest 校验、打包 |
@@ -204,7 +204,9 @@
 | 2026-11-22 | v1.0.0 | 首个可交付版本：扫描/悬停/悬浮球/本地图库/四个适配器/完整文档 |
 | 2026-11-22 | v1.1.0 | 新增 5 个免费适配器（Catbox/Pixeldrain/0x0.st/ImgBB/Imgur）；按媒体类型路由默认站点；跨站转存并保留历史；标签录入/chips/多选快捷筛选/搜索匹配；图库缩略图站点角标 |
 | 2026-11-22 | v1.2.1 | 删除 0x0.st；ImgPile 按开发者 API 真直传、YourImageShare 改可调参 key 接口；B 站视频走 playurl 真下载 mp4；个人空间改右侧可拖宽抽屉；修复清单面板盖住悬浮球菜单的叠层问题 |
+| 2026-11-22 | v1.2.2 | 上传目标只列可用站点；上传进度面板；抖音 m4s 探针 + DNR 补 Referer 实现真下载；入库即直传 |
 | 2026-11-23 | v1.2.0 | 新增 imgdb.io（默认启用，实机验证 201/直链）与 Unlockify 视频直链（默认启用，实机 20s 转存）；新增 Cloudinary / Wistia 直传；ImgPile / YourImageShare / Hippo 登记为网页上传入口；0x0.st 降级为实验性默认关闭（站点拒绝浏览器 UA）；设置页改紧凑卡片 + 页内滚动 |
+
 
 
 

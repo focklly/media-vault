@@ -14,6 +14,9 @@
 │  ├── 悬停按钮     pointerover → 定位 → 点击 → 端口任务 import                        │
 │  ├── 悬浮球       拖动/位置记忆/菜单（扫描、全部存入、清单、打开图库、设置）             │
 │  └── 清单面板     缩略预览 + 逐个存入                                                │
+│  src/content/main-hook.js （world: MAIN，document_start）                            │
+│  └── 网络探针     hook fetch / XHR / createObjectURL，把 m4s 直链写进 data-mv-media   │
+│                    （跨世界只走 DOM 属性这条单向桥，postMessage 回复收不到）            │
 └───────────────┬───────────────────────────────┬───────────────────────────────────┘
                 │ chrome.runtime.sendMessage    │ chrome.runtime.connect('mv-task')
                 │ （短请求）                     │ （长任务，防 SW 回收）

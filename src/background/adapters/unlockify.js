@@ -21,8 +21,8 @@ const API = `${BASE}/backend/api/web-upload`;
 const HEALTH = `${BASE}/backend/health/live`;
 const MAX_BYTES = Math.round(1.9 * 1024 * MB);
 /** 等待转码就绪的上限，避免 service worker 长时间挂起 */
-const POLL_TIMEOUT_MS = 75 * 1000;
-const POLL_INTERVAL_MS = 2500;
+const POLL_TIMEOUT_MS = 300 * 1000;
+const POLL_INTERVAL_MS = 4000;
 
 export default {
   id: 'unlockify',
@@ -51,7 +51,7 @@ export default {
     }
   },
 
-  async upload({ blob, fileName, kind, config }) {
+  async upload({ blob, fileName, kind, config, progress }) {
     if (kind && kind !== 'video') throw new Error('Unlockify 只接收视频文件');
 
     const form = new FormData();
@@ -70,7 +70,7 @@ export default {
     const jobId = json?.job_id || json?.job?.job_id;
     if (!jobId) throw new Error(`Unlockify 没有返回 job_id：${text.slice(0, 160)}`);
 
-    const job = await waitForJob(jobId);
+    const job = await waitForJob(jobId, progress);
     if (!job.video_url) throw new Error(`视频处理完成但没有拿到链接：${JSON.stringify(job).slice(0, 160)}`);
 
     const pageUrl = absolute(job.video_url);
@@ -83,8 +83,9 @@ export default {
 };
 
 /** 轮询 job 直到 ready / failed / 超时 */
-async function waitForJob(jobId) {
+async function waitForJob(jobId, progress) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const startedAt = Date.now();
   let last = null;
   while (Date.now() < deadline) {
     const res = await fetchRetry(`${API}/${encodeURIComponent(jobId)}`);
@@ -94,6 +95,10 @@ async function waitForJob(jobId) {
       if (last?.status === 'ready') return last;
       if (last?.status === 'failed') throw new Error(`Unlockify 处理失败：${last.error || '站点未给出原因'}`);
     }
+    const waited = Math.round((Date.now() - startedAt) / 1000);
+    try {
+      progress?.(`已上传，站点转存中（${waited}s / 最多 ${Math.round(POLL_TIMEOUT_MS / 1000)}s，状态 ${last?.status || 'unknown'}）`);
+    } catch (_) { /* 页面已关闭 */ }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   const tail = last ? `（最后一次状态：${last.status}）` : '';
@@ -133,3 +138,4 @@ function describe(text) {
     return (text || '').slice(0, 160);
   }
 }
+

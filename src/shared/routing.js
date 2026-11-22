@@ -17,7 +17,7 @@
  */
 export function resolveTargetAdapter(settings, kind, adapters) {
   const auto = settings?.autoUpload || {};
-  const enabled = (adapters || []).filter((a) => a.enabled);
+  const enabled = (adapters || []).filter((a) => a.enabled && a.ready !== false && !a.webOnly);
   const supports = (a) => (a.supports || []).includes(kind);
 
   const byKind = auto.byKind?.[kind];
@@ -46,7 +46,22 @@ export function adapterSupports(adapter, kind) {
   return (adapter?.supports || []).includes(kind);
 }
 
-/** 不支持该类型时的中文原因文案 */
+/**
+ * 适配器是否「现在就能用」：非网页入口，且必填字段都有值。
+ * 用于把没配置好的站点从下拉列表里剔除，避免选了就报错。
+ */
+export function adapterConfigured(adapter, config) {
+  if (!adapter || adapter.webOnly) return false;
+  const fields = adapter.fields || [];
+  for (const f of fields) {
+    if (!f || !f.required || f.type === 'boolean') continue;
+    const v = config?.[f.key];
+    if (v === undefined || v === null || String(v).trim() === '') return false;
+  }
+  return true;
+}
+
+/** 仍保留：不支持该类型时的中文原因文案 */
 export function unsupportedReason(kind) {
   return kind === 'video' ? '不支持视频' : '不支持图片';
 }

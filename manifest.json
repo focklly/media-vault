@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "影图管家 MediaVault",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "页面图片/视频自动发现，一键存入个人空间；内置 imgdb.io 图床与 Unlockify 视频直链，另可接 ImgPile、Catbox、Pixeldrain、ImgBB、Imgur、Cloudinary、Wistia、GitHub 图床、S3、WebDAV 网盘；B 站视频可直接存 mp4，支持标签与跨站转存。",
   "minimum_chrome_version": "116",
   "icons": {
@@ -35,7 +35,8 @@
     "tabs",
     "notifications",
     "downloads",
-    "scripting"
+    "scripting",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "http://*/*",
@@ -52,6 +53,18 @@
       ],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/content/main-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [
@@ -67,6 +80,7 @@
     }
   ]
 }
+
 
 
 

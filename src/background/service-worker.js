@@ -31,14 +31,48 @@ const LIBRARY_PAGE = 'src/library/library.html';
 const SETTINGS_PAGE = 'src/settings/settings.html';
 const ICON_128 = 'src/icons/icon-128.png';
 
+/**
+ * 抖音视频 CDN（douyinvod.com）按 Referer 做防盗链：没有 Referer 一律 403。
+ * 扩展后台 fetch 属于非页面请求，浏览器不会自带 Referer，且 fetch 的 referrer 选项
+ * 对跨源请求会被裁掉，所以只能用 declarativeNetRequest 在扩展发起的请求上加 Referer。
+ */
+const DOUYIN_REFERER_RULE_ID = 9101;
+function ensureDouyinRefererRule() {
+  const rule = {
+    id: DOUYIN_REFERER_RULE_ID,
+    priority: 1,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [
+        { header: 'referer', operation: 'set', value: 'https://www.douyin.com/' },
+        { header: 'origin', operation: 'remove' },
+      ],
+    },
+    condition: {
+      urlFilter: '||douyinvod.com',
+      resourceTypes: ['xmlhttprequest', 'media', 'other'],
+      tabIds: [-1],
+    },
+  };
+  chrome.declarativeNetRequest
+    .updateSessionRules({ removeRuleIds: [DOUYIN_REFERER_RULE_ID], addRules: [rule] })
+    .catch(() => {});
+}
+ensureDouyinRefererRule();
+
 /** 组装路由/UI 共用的适配器描述（含启用态），纯数据、剥离函数 */
 function adapterDescriptors(settings) {
-  return ADAPTERS.map((a) => ({
-    id: a.id,
-    label: a.label,
-    supports: a.supports,
-    enabled: settings?.adapters?.[a.id]?.enabled === true,
-  }));
+  return ADAPTERS.map((a) => {
+    const config = settings?.adapters?.[a.id] || {};
+    return {
+      id: a.id,
+      label: a.label,
+      supports: a.supports,
+      enabled: config.enabled === true,
+      webOnly: a.webOnly === true,
+      ready: a.isConfigured ? a.isConfigured(config) === true : true,
+    };
+  });
 }
 
 /** 按媒体类型解析目标站点（byKind → 全局兜底 → 第一个支持该类型的已启用站点） */
@@ -331,6 +365,27 @@ async function importMedia(raw, settings) {
     if (blob.size > maxBytes) {
       throw new Error(`视频 ${formatBytes(blob.size)} 超过单文件上限 ${formatBytes(maxBytes)}`);
     }
+  } else if (raw.douyinCandidates && raw.douyinCandidates.length) {
+    // 抖音：探针抓到的是 m4s 分轨，其中一半是纯音频。先小范围取头部验轨，
+    // 挑出真正带 vide 轨道的那个再整段下载。
+    const picked = await resolveDouyinVideo(raw.douyinCandidates);
+    const fetched = picked
+      ? await fetchMedia(picked, 'https://www.douyin.com/')
+      : { ok: false, reason: '候选地址里没有视频轨（只有音频或已过期）' };
+    if (!fetched.ok) {
+      item.status = 'link-only';
+      item.sourceUrl = pageUrl || url;
+      item.note = `抖音：已抓到直链但下载失败：${fetched.reason}`;
+      await putItem(item);
+      return { item, linkOnly: true };
+    }
+    const maxBytes = maxImportBytes(settings);
+    if (fetched.blob.size > maxBytes) {
+      throw new Error(`视频 ${formatBytes(fetched.blob.size)} 超过单文件上限 ${formatBytes(maxBytes)}`);
+    }
+    blob = fetched.blob;
+    item.mime = fetched.mime;
+    item.sourceUrl = picked;
   } else if (raw.stream) {
     // m3u8 / mpd 分片流，扩展无法整体下载，保存为“流媒体记录”
     item.status = 'link-only';
@@ -442,8 +497,33 @@ async function resolveBilibiliVideo(pageUrl) {
   }
 }
 
-async function fetchMedia(url, pageUrl) {
-  if (url.startsWith('data:')) {
+/** 抖音 m4s：只取前 64KB 看有没有 vide 轨道（纯音频轨只有 soun） */
+async function hasVideoTrack(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-65535', Accept: '*/*' },
+      credentials: 'include',
+      referrer: 'https://www.douyin.com/',
+    });
+    if (!res.ok) return false;
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+    return text.includes('vide');
+  } catch (_) {
+    return false;
+  }
+}
+
+async function resolveDouyinVideo(candidates) {
+  for (const u of candidates.slice(0, 8)) {
+    if (await hasVideoTrack(u)) return u;
+  }
+  return '';
+}
+
+async function fetchMedia(url, pageUrl) {  if (url.startsWith('data:')) {
     const blob = dataUrlToBlob(url);
     return { ok: true, blob, mime: blob.type };
   }
@@ -502,12 +582,12 @@ async function makeThumb(blob, kind = KIND.IMAGE) {
  * 上传流程
  * ------------------------------------------------------------------ */
 
-async function uploadOne(id, adapterId, settings) {
+async function uploadOne(id, adapterId, settings, progress) {
   const item = await getItem(id);
   if (!item) throw new Error('条目不存在或已被删除');
   const targetId = adapterId || resolveTarget(settings, item.kind)?.id;
-  if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用站点');
-  const next = await uploadItemObject(item, targetId, settings);
+  if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用并配置站点');
+  const next = await uploadItemObject(item, targetId, settings, progress);
   return { item: next };
 }
 
@@ -520,8 +600,10 @@ async function uploadMany(ids = [], adapterId, settings, progress) {
       if (!item) throw new Error('条目不存在');
       // 未显式指定站点时，逐条按类型走共享路由；都不满足则给出可读错误
       const targetId = adapterId || resolveTarget(settings, item.kind)?.id;
-      if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用站点');
-      const next = await uploadItemObject(item, targetId, settings);
+      if (!targetId) throw new Error('没有可用的上传目标，请先在设置页启用并配置站点');
+      const next = await uploadItemObject(item, targetId, settings, (p) => {
+        progress({ done, total: ids.length, message: p.message || `正在上传 ${Math.min(done + 1, ids.length)}/${ids.length}` });
+      });
       results.push({ id, ok: true, url: next.remote?.url });
     } catch (err) {
       results.push({ id, ok: false, error: String(err.message || err) });
@@ -534,21 +616,34 @@ async function uploadMany(ids = [], adapterId, settings, progress) {
   return { results, ok: okCount, failed: results.length - okCount };
 }
 
-async function uploadItemObject(item, adapterId, settings) {
+async function uploadItemObject(item, adapterId, settings, progress) {
   const blob = item.files?.orig ? await getBlob(item.files.orig) : null;
   if (!blob) throw new Error('本地没有文件副本（该条目为仅链接记录），无法上传');
   const config = settings.adapters?.[adapterId];
   if (!config) throw new Error(`没有找到「${adapterId}」的配置`);
+  const report = (msg) => { try { progress?.({ done: 0, total: 1, message: typeof msg === 'string' ? msg : msg?.message || '' }); } catch (_) { /* 页面已关闭 */ } };
+  const startedAt = Date.now();
 
   try {
-    const result = await uploadTo(adapterId, {
-      blob,
-      fileName: item.fileName,
-      mime: item.mime || blob.type,
-      kind: item.kind,
-      config,
-      item,
-    });
+    report(`正在上传 ${formatBytes(blob.size)}…`);
+    // fetch 拿不到上传字节进度，用「已用时间」让进度条一直在动，避免看起来没反应
+    const ticker = setInterval(() => {
+      report(`正在上传 ${formatBytes(blob.size)}… 已用 ${Math.round((Date.now() - startedAt) / 1000)}s`);
+    }, 1500);
+    let result;
+    try {
+      result = await uploadTo(adapterId, {
+        blob,
+        fileName: item.fileName,
+        mime: item.mime || blob.type,
+        kind: item.kind,
+        config,
+        item,
+        progress: report,
+      });
+    } finally {
+      clearInterval(ticker);
+    }
     const next = await updateItem(item.id, {
       remote: {
         adapterId,

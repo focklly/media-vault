@@ -43,6 +43,7 @@
   const STORAGE_LIB_WIDTH = 'mv.libraryWidth';
   const MAX_BLOB_BYTES = 64 * 1024 * 1024;
   const MAX_INLINE_DATAURL = 8 * 1024 * 1024;
+  const STATE_VERSION = '1.2.2';
   const Z = 2147483647;
 
   const DEFAULTS = {
@@ -303,6 +304,7 @@
   function buildShell() {
     const host = document.createElement('div');
     host.id = 'mv-mediavault-host';
+    host.dataset.mvVersion = STATE_VERSION;
     host.style.cssText = `all:initial;position:fixed;inset:0;z-index:${Z};pointer-events:none;`;
     (document.body || document.documentElement).appendChild(host);
 
@@ -1134,6 +1136,113 @@
     return /(^|\.)bilibili\.com$/i.test(location.hostname);
   }
 
+  function isDouyinPage() {
+    return /(^|\.)(douyin\.com|iesdouyin\.com)$/i.test(location.hostname);
+  }
+
+  /** 从探针结果里挑出一组候选（按「最像无水印视频本体」排序，交给后台逐条验轨） */
+  function rankDouyinUrls(list) {
+    const items = (list || []).filter((u) => typeof u === 'string' && /^https?:/.test(u));
+    if (!items.length) return [];
+    const scored = items.map((u) => {
+      let score = 0;
+      if (/mime_type=video_mp4/i.test(u)) score += 30;
+      if (/douyinvod|douyin\.com\/aweme/i.test(u)) score += 20;
+      if (/video_id/i.test(u)) score += 10;
+      if (/water/i.test(u)) score -= 10;
+      return { u, score, len: u.length };
+    });
+    scored.sort((a, b) => b.score - a.score || b.len - a.len);
+    return scored.map((s) => s.u).slice(0, 8);
+  }
+
+  /** 抖音候选直链：探针优先，其次首屏数据里的 play_addr */
+  async function douyinVideoUrls() {
+    const list = rankDouyinUrls(readProbedMedia());
+    if (list.length) return list;
+    const state = readDouyinState();
+    if (!state) return [];
+    const found = [];
+    const push = (url, bitrate, key) => {
+      if (typeof url !== 'string' || !/^https?:/.test(url)) return;
+      if (!/\.(mp4|m4s|webm)(\?|$)/i.test(url)) return;
+      found.push({ url, bitrate: Number(bitrate) || 0, key: key || '' });
+    };
+    const walk = (node, key, depth) => {
+      if (!node || typeof node !== 'object' || depth > 14) return;
+      if (Array.isArray(node)) {
+        node.forEach((v) => walk(v, key, depth + 1));
+        return;
+      }
+      const lists = node.url_list || node.urlList;
+      if (Array.isArray(lists)) lists.forEach((u) => push(u, node.bit_rate || node.bitRate, key));
+      for (const [k, v] of Object.entries(node)) walk(v, k, depth + 1);
+    };
+    walk(state, '', 0);
+    if (!found.length) return [];
+    found.sort((a, b) => {
+      const scoreA = (a.key === 'play_addr' || a.key === 'playAddr' ? 1e9 : 0) + a.bitrate;
+      const scoreB = (b.key === 'play_addr' || b.key === 'playAddr' ? 1e9 : 0) + b.bitrate;
+      return scoreB - scoreA;
+    });
+    return found.map((f) => f.url).slice(0, 8);
+  }
+
+  /** 读页面主世界探针（main-hook.js）写到 DOM 属性里的媒体地址 */
+  function readProbedMedia() {
+    try {
+      const raw = document.documentElement.getAttribute('data-mv-media');
+      if (!raw) return [];
+      const list = JSON.parse(raw);
+      return Array.isArray(list) ? list : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /** 从探针结果里挑一条最像「无水印视频本体」的地址 */
+  function pickDouyinUrl(list) {
+    const items = (list || []).filter((u) => typeof u === 'string' && /^https?:/.test(u));
+    if (!items.length) return '';
+    const scored = items.map((u) => {
+      let score = 0;
+      if (/mime_type=video_mp4/i.test(u)) score += 30;
+      if (/douyinvod|douyin\.com\/aweme/i.test(u)) score += 20;
+      if (/video_id/i.test(u)) score += 10;
+      if (/water/i.test(u)) score -= 10;
+      return { u, score, len: u.length };
+    });
+    scored.sort((a, b) => b.score - a.score || b.len - a.len);
+    return scored[0].u;
+  }
+
+  function readDouyinState() {
+    const candidates = [];
+    const rd = document.getElementById('RENDER_DATA');
+    if (rd && rd.textContent) candidates.push(rd.textContent);
+    for (const s of document.querySelectorAll('script')) {
+      const txt = s.textContent || '';
+      if (txt.includes('_ROUTER_DATA') || txt.includes('"play_addr"')) candidates.push(txt);
+    }
+    for (const raw of candidates) {
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start < 0 || end <= start) continue;
+      const body = raw.slice(start, end + 1);
+      for (const text of [body, safeDecode(body)]) {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object') return parsed;
+        } catch (_) { /* 换下一种解析方式 */ }
+      }
+    }
+    return null;
+  }
+
+  function safeDecode(text) {
+    try { return decodeURIComponent(text); } catch (_) { return text; }
+  }
+
   /**
    * 抓取 blob: URL（页面内 MediaSource / createObjectURL 的视频）
    * 这类地址离开页面就失效，必须在页面上下文里转成 dataUrl 再交给后台。
@@ -1161,13 +1270,22 @@
           // MediaSource（MSE）播放的 blob: 没有可读字节（B 站、YouTube 等都这样），
           // 视频退化成「仅链接记录」，把页面地址和封面存进来，而不是直接失败
           if (media.kind === KIND.VIDEO) {
-            payload.url = location.href;
+            const douyinUrl = isDouyinPage() ? await douyinVideoUrls() : [];
             if (isBilibiliPage()) {
               // B 站：让后台用 playurl 接口解析出真正的 mp4 直链并下载
+              payload.url = location.href;
               payload.bilibiliResolve = true;
+            } else if (douyinUrl.length) {
+              // 抖音：把一组候选直链交给后台，后台逐条验轨（排除纯音频 m4s）后下载
+              payload.url = douyinUrl[0];
+              payload.douyinCandidates = douyinUrl;
+              payload.pageUrl = location.href;
+              payload.fileName = `${(document.title || 'douyin').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'douyin'}.mp4`;
             } else {
+              payload.url = location.href;
               payload.stream = true;
               payload.linkOnly = true;
+              payload.note = '抖音：没有抓到可下载的视频直链，已保存播放页链接';
             }
           } else {
             throw err;
@@ -1180,6 +1298,9 @@
         openLibraryAfter: false,
       });
       const item = result.imported && result.imported[0];
+      if (!item && result.failed && result.failed.length) {
+        throw new Error(result.failed[0].error || '存入失败');
+      }
       if (item) {
         if (item.status === 'link-only' && item.kind === KIND.VIDEO) {
           toast(item.note || '该站点用流媒体播放（MSE），无法下载视频本体：已保存页面链接与封面', false, 3600);
@@ -1188,7 +1309,9 @@
         }
         if (item.remote && item.remote.url) {
           const label = item.targetLabel ? ` · ${item.targetLabel}` : '';
-          toast(`已存入并上传${label} · ${item.title}`);
+          toast(`已直传${label} · ${item.title}`);
+        } else if (item.remote && item.remote.error) {
+          toast(`已存本地，直传失败：${item.remote.error}`, true, 4200);
         } else {
           toast(opts.forceUpload ? `已存入本地（上传未完成，请到个人空间查看）` : `已存入个人空间 · ${item.title}`);
         }
@@ -1211,11 +1334,19 @@
       await scanPage({ silent: true });
     }
     const bili = isBilibiliPage();
+    const douyinUrls = isDouyinPage() ? await douyinVideoUrls() : [];
     const items = state.inventory.map((i) => {
       if (!(i.blobUrl && i.kind === KIND.VIDEO)) return buildPayload(i);
-      return buildPayload(i, bili
-        ? { url: location.href, bilibiliResolve: true }
-        : { url: location.href, stream: true, linkOnly: true });
+      if (bili) return buildPayload(i, { url: location.href, bilibiliResolve: true });
+      if (douyinUrls.length) {
+        return buildPayload(i, {
+          url: douyinUrls[0],
+          douyinCandidates: douyinUrls,
+          pageUrl: location.href,
+          fileName: `${(document.title || 'douyin').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'douyin'}.mp4`,
+        });
+      }
+      return buildPayload(i, { url: location.href, stream: true, linkOnly: true });
     });
     if (!items.length) {
       toast('没有可存入的媒体');
@@ -1358,3 +1489,4 @@
     init();
   }
 })();
+
