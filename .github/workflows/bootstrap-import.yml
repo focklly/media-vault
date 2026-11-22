@@ -1,0 +1,22 @@
+name: bootstrap-import
+on:
+  push:
+    paths:
+      - .github/workflows/bootstrap-import.yml
+  workflow_dispatch:
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch source zip
+        run: |
+          curl -fsSL -A "Mozilla/5.0" -o /tmp/src.zip "https://aka.doubaocdn.com/s/XtbVuCjevL"
+          unzip -o -q /tmp/src.zip -d .
+      - name: Commit and push
+        run: |
+          git config user.name "MediaVault Bot"
+          git config user.email "bot@mediavault.local"
+          git add -A -- . ':!.github/workflows'
+          git commit -m "chore: sync v1.2.0 source" || echo "no changes"
+          git push
