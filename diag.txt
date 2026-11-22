@@ -1,0 +1,26 @@
+== aka doubaocdn ==
+http=200 size=409061
+== headers ==
+HTTP/2 302 
+server: Tengine
+content-type: application/json
+content-length: 2
+location: https://p26-flow-sign.byteimg.com/tos-cn-i-ik7evvg4ik/1b3a4e85d09b47b7b81f3d60e187ad23~tplv-a9rns2rl98-image.image?lk3s=8e244e95&rcl=20261122130549CE602F40E5F334B49ED4&rrcfp=935dee89&x-expires=1795930006&x-signature=WOuNHdx9f05gtREkjJzMb%2BZgFGs%3D
+date: Sun, 22 Nov 2026 05:33:01 GMT
+cache-control: public, max-age=604800
+x-tt-logid: 20261122133301690063B502436F59AA42
+server-timing: inner; dur=10,tt_agw; dur=6
+strict-transport-security: max-age=31536000; includeSubDomains
+x-tt-trace-host: 01d4df7a2d7c75384198387c426722908f5d564d6adb0b4905014e9b5b228cfa4c15e4f790d6e5c8217ae6f5e6067fa695deb637822bdc4d3dd212633b373e6cde73810fe36999a7dd80db8cafce29c1d4bd73b7931e19b3095ce2531e49d9717c
+x-tt-trace-tag: id=03;cdn-cache=miss;type=dyn
+x-tt-trace-id: 00-261122133301690063B502436F59AA42-0D1DB1D26AD0F0CF-00
+x-tt-timestamp: 1795325581.231
+via: ens-cache32.l2eo166-17[90,0], ens-cache50.l2us4[220,0], ens-cache13.us24[248,0]
+server-timing: cdn-cache;desc=MISS,edge;dur=158,origin;dur=90
+timing-allow-origin: *
+eagleid: 083055a117953255810727172e
+
+HTTP/2 200 
+== dns ==
+2404:2280:1b5:0:3::6b aka.doubaocdn.com.230b2a2545cfa773.queniuck.com aka.doubaocdn.com aka.doubaocdn.com.bytedns3.com
+2404:2280:1b5:0:3::6a aka.doubaocdn.com.230b2a2545cfa773.queniuck.com aka.doubaocdn.com aka.doubaocdn.com.bytedns3.com
